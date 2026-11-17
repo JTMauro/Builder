@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "media": {
+      "command": "media-backend",
+      "args": ["mcp"],
+      "env": {
+        "MEDIA_BACKEND_DATA": "${HOME}/.media-backend"
+      }
+    }
+  }
+}
