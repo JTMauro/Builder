@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Builder</title>
+  <meta name="description" content="Audio & video workshop with a built-in Claude assistant">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M8 40a24 24 0 0 1 48 0z' fill='%23ff7a1a'/%3E%3Crect x='4' y='38' width='56' height='8' rx='4' fill='%23d9590a'/%3E%3Ccircle cx='32' cy='30' r='6' fill='%23ffe066'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <!-- ============================================================ intro -->
+  <div id="intro" aria-hidden="true">
+    <div class="plank-door left"><div class="planks"></div></div>
+    <div class="plank-door right"><div class="planks"></div></div>
+    <div class="intro-sign">Builder</div>
+    <div id="nail"><div class="nail-head"></div><div class="nail-shaft"></div></div>
+    <div id="sparks"></div>
+    <button id="skip-intro" type="button">Skip intro</button>
+  </div>
+
+  <!-- The mascot: one element that performs the intro, then flies into the header slot. -->
+  <div id="mascot" aria-hidden="true">
+    <svg viewBox="0 0 220 260" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="m-body" cx="40%" cy="30%" r="75%">
+          <stop offset="0" stop-color="#5fe0d3"/><stop offset=".55" stop-color="#1fb5a8"/><stop offset="1" stop-color="#0e7d75"/>
+        </radialGradient>
+        <radialGradient id="m-hat" cx="35%" cy="25%" r="80%">
+          <stop offset="0" stop-color="#ffb35c"/><stop offset=".5" stop-color="#ff7a1a"/><stop offset="1" stop-color="#c94f05"/>
+        </radialGradient>
+        <linearGradient id="m-face" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#1d2b3f"/><stop offset="1" stop-color="#0c1422"/>
+        </linearGradient>
+        <linearGradient id="m-steel" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#e9eef5"/><stop offset=".5" stop-color="#9aa6b8"/><stop offset="1" stop-color="#5d6a7e"/>
+        </linearGradient>
+        <linearGradient id="m-wood" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#b57a3c"/><stop offset=".5" stop-color="#d9a066"/><stop offset="1" stop-color="#8f5a26"/>
+        </linearGradient>
+        <filter id="m-glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="3"/>
+        </filter>
+      </defs>
+      <!-- ground shadow -->
+      <ellipse class="m-shadow" cx="105" cy="250" rx="62" ry="8" fill="#000" opacity=".22"/>
+      <g class="m-whole">
+        <!-- legs & boots -->
+        <rect x="74" y="200" width="18" height="30" rx="8" fill="#0e7d75"/>
+        <rect x="118" y="200" width="18" height="30" rx="8" fill="#0e7d75"/>
+        <path d="M64 236q0-12 14-12h16q6 0 6 8v8H64z" fill="#2b3446"/>
+        <path d="M110 240v-8q0-8 6-8h16q14 0 14 12v4z" fill="#2b3446"/>
+        <!-- left arm (resting) -->
+        <path d="M58 140q-20 18-14 48" stroke="#14968b" stroke-width="16" stroke-linecap="round" fill="none"/>
+        <circle cx="45" cy="190" r="11" fill="#2b3446"/>
+        <!-- body -->
+        <rect x="56" y="118" width="98" height="92" rx="38" fill="url(#m-body)"/>
+        <rect x="80" y="146" width="50" height="34" rx="10" fill="#0e7d75" opacity=".45"/>
+        <circle cx="105" cy="163" r="9" fill="#ffe066"/>
+        <circle cx="105" cy="163" r="4" fill="#ff7a1a"/>
+        <circle cx="74" cy="134" r="3" fill="#bff5ef"/><circle cx="136" cy="134" r="3" fill="#bff5ef"/>
+        <!-- head -->
+        <g class="m-head">
+          <rect x="52" y="52" width="106" height="80" rx="34" fill="url(#m-body)"/>
+          <rect x="64" y="66" width="82" height="56" rx="24" fill="url(#m-face)"/>
+          <g class="m-eyes">
+            <ellipse cx="88" cy="92" rx="8" ry="10" fill="#7ff7ea"/>
+            <ellipse cx="122" cy="92" rx="8" ry="10" fill="#7ff7ea"/>
+            <circle cx="91" cy="88" r="2.6" fill="#fff"/><circle cx="125" cy="88" r="2.6" fill="#fff"/>
+          </g>
+          <path d="M92 108q13 9 26 0" stroke="#7ff7ea" stroke-width="4" stroke-linecap="round" fill="none"/>
+          <!-- hard hat with headlamp -->
+          <path d="M50 64q2-48 55-48t55 48z" fill="url(#m-hat)"/>
+          <path d="M100 18q5-3 10 0v44h-10z" fill="#ffffff" opacity=".18"/>
+          <rect x="38" y="58" width="134" height="12" rx="6" fill="#d9590a"/>
+          <circle class="m-lamp-glow" cx="105" cy="42" r="14" fill="#fff4a8" filter="url(#m-glow)"/>
+          <circle cx="105" cy="42" r="9" fill="#ffe066" stroke="#c94f05" stroke-width="3"/>
+        </g>
+        <!-- right arm with hammer (rotates at the shoulder) -->
+        <g class="m-arm">
+          <path d="M152 140q24 2 30-22" stroke="#14968b" stroke-width="16" stroke-linecap="round" fill="none"/>
+          <g class="m-hammer">
+            <rect x="176" y="40" width="10" height="84" rx="4" fill="url(#m-wood)"/>
+            <rect x="160" y="30" width="44" height="20" rx="5" fill="url(#m-steel)"/>
+            <rect x="198" y="33" width="10" height="14" rx="3" fill="#5d6a7e"/>
+          </g>
+          <circle cx="182" cy="116" r="11" fill="#2b3446"/>
+        </g>
+      </g>
+    </svg>
+  </div>
+
+  <!-- ============================================================ app -->
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <div id="mascot-slot"></div>
+        <div>
+          <h1 class="title">Builder</h1>
+          <p class="tagline">Audio &amp; video workshop</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="server-status" class="pill">Connecting…</span>
+        <button id="token-btn" class="btn ghost small" type="button" hidden>Access token</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- Library -->
+      <section class="panel library" aria-labelledby="lib-h">
+        <div class="panel-head">
+          <h2 id="lib-h">Library</h2>
+          <span id="file-count" class="muted"></span>
+        </div>
+        <label id="dropzone" class="dropzone">
+          <input id="file-input" type="file" multiple hidden>
+          <div class="drop-icon">⬆</div>
+          <div><strong>Drop files here</strong><br><span class="muted">or click to upload video, audio, images</span></div>
+        </label>
+        <div id="upload-progress" class="muted small-text"></div>
+        <div id="file-grid" class="file-grid"></div>
+      </section>
+
+      <!-- Workbench -->
+      <section class="panel bench" aria-labelledby="bench-h">
+        <div class="panel-head">
+          <h2 id="bench-h">Workbench</h2>
+          <span id="selected-label" class="muted">Pick a file from the library</span>
+        </div>
+        <div id="preview" class="preview empty">
+          <div class="preview-empty">Your selected file shows up here</div>
+        </div>
+        <div id="probe" class="probe"></div>
+
+        <h3 class="section-label">Tools</h3>
+        <div id="op-tiles" class="op-tiles"></div>
+        <form id="op-form" class="op-form" hidden>
+          <div class="op-form-head">
+            <div>
+              <h3 id="op-title"></h3>
+              <p id="op-desc" class="muted"></p>
+            </div>
+            <button type="button" id="op-close" class="btn ghost small" aria-label="Close tool">✕</button>
+          </div>
+          <div id="op-fields" class="fields"></div>
+          <div class="form-actions">
+            <button type="submit" class="btn primary" id="op-run">Build it</button>
+            <span id="op-status" class="muted"></span>
+          </div>
+        </form>
+
+        <h3 class="section-label">Jobs</h3>
+        <div id="jobs" class="jobs"><div class="muted">No jobs yet</div></div>
+      </section>
+
+      <!-- Assistant -->
+      <section class="panel chat" aria-labelledby="chat-h">
+        <div class="panel-head">
+          <h2 id="chat-h">Ask <span id="bot-name">Rivet</span></h2>
+          <button type="button" id="chat-reset" class="btn ghost small">New chat</button>
+        </div>
+        <div id="chat-log" class="chat-log" aria-live="polite"></div>
+        <form id="chat-form" class="chat-form">
+          <label class="attach">
+            <input type="checkbox" id="chat-attach" checked>
+            <span>Include selected file</span>
+          </label>
+          <div class="chat-input-row">
+            <textarea id="chat-input" rows="2" placeholder="e.g. Animate my frames at 12 fps with the theme music" required></textarea>
+            <button class="btn primary" type="submit" id="chat-send">Send</button>
+          </div>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="token-dialog">
+    <form method="dialog" class="token-form">
+      <h3>Access token</h3>
+      <p class="muted">This server needs a token. It's saved in this browser only.</p>
+      <input id="token-input" type="password" autocomplete="off" placeholder="MEDIA_BACKEND_TOKEN">
+      <div class="form-actions"><button class="btn primary" value="ok">Save</button><button class="btn ghost" value="cancel">Cancel</button></div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

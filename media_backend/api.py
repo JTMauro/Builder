@@ -6,9 +6,12 @@ import contextlib
 import hmac
 from typing import Any
 
+from pathlib import Path
+
 import anthropic
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
 from . import __version__, ops, storage
@@ -45,8 +48,13 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def auth(request: Request, call_next):
         token = get_settings().api_token
-        if token and request.url.path not in ("/health",):
+        path = request.url.path
+        public = path in ("/", "/health", "/favicon.ico") or path.startswith("/static/")
+        if token and not public:
             given = request.headers.get("authorization", "")
+            # <img>/<video> tags can't send headers, so file downloads may pass ?access_token= instead.
+            if not given and request.method == "GET" and path.endswith("/content"):
+                given = f"Bearer {request.query_params.get('access_token', '')}"
             if not hmac.compare_digest(given, f"Bearer {token}"):
                 return JSONResponse({"detail": "Missing or wrong bearer token"}, status_code=401)
         return await call_next(request)
@@ -159,5 +167,12 @@ def create_app() -> FastAPI:
         s = get_settings()
         return {"name": s.assistant_name, "persona": s.assistant_persona, "model": s.model, "effort": s.effort}
 
+    static_dir = Path(__file__).parent / "static"
+
+    @app.get("/", include_in_schema=False)
+    def index():
+        return FileResponse(static_dir / "index.html", headers={"Cache-Control": "no-cache"})
+
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
     app.mount("/mcp", mcp_app)
     return app

@@ -1,5 +1,7 @@
 # Media Backend
 
+![Builder web app](docs/screenshot.png)
+
 An audio/video processing backend you can reuse from any project. It has three parts:
 
 1. **Media API** (HTTP, FastAPI + ffmpeg): upload files, run operations, download the results.
@@ -45,7 +47,20 @@ export ANTHROPIC_API_KEY=... # only needed for the assistant
 media-backend serve --host 127.0.0.1 --port 8000
 ```
 
-API docs are at `http://127.0.0.1:8000/docs`.
+Open `http://127.0.0.1:8000/` for the **Builder** web app. API docs are at `http://127.0.0.1:8000/docs`.
+
+### The web app
+
+- **Intro:** the mascot hammers a nail three times, the plank doors swing open, and it flies up next to
+  the "Builder" title (`docs/intro.mp4`). It plays once per browser tab; "Skip intro" or a reduced-motion
+  setting skips it.
+- **Library:** drag-and-drop uploads, live thumbnails, hover-to-play videos. Shift-click files to pick
+  several, in order (for joining clips or animating frames).
+- **Workbench:** a preview with media details, plus a tile for every tool. Forms are generated from each
+  operation's schema, so new operations appear automatically.
+- **Jobs:** live status. Results open in the preview, and the mascot hammers away while anything is running.
+- **Chat:** talk to the assistant, which can see the selected file. Click the mascot to jump to the chat.
+- Light and dark themes, responsive down to phone width. If the server has a token, the page asks for it once.
 
 ## Connect Claude Code
 

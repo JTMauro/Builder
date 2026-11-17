@@ -128,3 +128,14 @@ def test_assistant_reports_tool_errors(media):
     res = bot.chat("trim it")
     assert res.tool_calls[0]["ok"] is False
     assert m.last["messages"][-1]["content"][0]["is_error"] is True
+
+
+def test_frontend_served_without_token(monkeypatch):
+    from media_backend import config
+    monkeypatch.setenv("MEDIA_BACKEND_TOKEN", "s3cret")
+    config.reset_settings()
+    with TestClient(create_app()) as c:
+        page = c.get("/")
+        assert page.status_code == 200 and "Builder" in page.text and 'id="mascot"' in page.text
+        assert c.get("/static/app.js").status_code == 200 and c.get("/static/app.css").status_code == 200
+        assert c.get("/files").status_code == 401
