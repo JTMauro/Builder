@@ -148,6 +148,9 @@ function setBlur(){
   const def = defocus(d), mm = pupil*def*dm, sigma = mm*pxPerMm()/4;
   $('#sampleWrap').style.filter = sigma>0.05 ? `blur(${sigma.toFixed(2)}px)` : 'none';
   $('#defnote').textContent = `At ${dm.toFixed(1)} m this eye has ${def.toFixed(2)} D of focus error, a blur circle about ${mm.toFixed(1)} mm wide on the screen.`;
+  if(def<0.05 && d!==0) $('#defnote').textContent += d<0
+    ? ` A ${d} D short-sighted eye sees clearly closer than ${(1/-d).toFixed(1)} m, so move the distance slider past that to see blur.`
+    : ` A long-sighted eye can refocus up close here. Untick "Eye can refocus" below to see the blur.`;
 }
 $('#diop').oninput = setBlur;
 ['dist','pupil','accom'].forEach(i=>$('#'+i).addEventListener('input',setBlur));
