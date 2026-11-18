@@ -1,0 +1,59 @@
+---
+name: use-builder
+description: Use the Builder media backend (audio/video tools, Rivet the Claude assistant, web app) from another project, or extend Builder itself. Use when a task needs video or audio processing (trim, convert, captions, soundtracks, joining clips, GIFs, thumbnails, frame-by-frame or still-image animation), when someone mentions Builder or Rivet, or when adding a feature to this repository.
+---
+
+# Using Builder
+
+Builder is a Python (FastAPI + ffmpeg) service in this repository. It offers 18 media operations
+through three doors that share one registry (`media_backend/ops.py`):
+
+1. **MCP connector** (best for Claude Code): tools such as `trim`, `add_text`, `images_to_video`,
+   `animate_image`, `import_path`, `export_file`, `view_file`, `ask_assistant`.
+2. **HTTP API:** `POST /files`, `POST /ops/{operation}`, `POST /jobs`, `GET /files/{id}/content`, and so on.
+3. **Rivet, the built-in assistant:** `POST /assistant/chat`, or the MCP tool `ask_assistant`, for
+   multi-step requests in plain words.
+
+## Pick the setup
+
+**A. Same machine as the other project (simplest).** Install Builder, then register the connector in
+that project. Claude Code starts Builder itself, and files move in and out of the project directory.
+
+```bash
+pip install "git+https://github.com/JTMauro/builder.git"   # private repo: needs GitHub access
+claude mcp add builder -- media-backend mcp
+```
+
+Add `-e ANTHROPIC_API_KEY=...` only if you want `ask_assistant` (Rivet). The media tools work without it.
+
+**B. A shared Builder server.** Someone runs `media-backend serve --host 0.0.0.0` behind HTTPS. Each
+person signs in to the web app, opens *their name → Connect Claude Code*, and runs the command it shows:
+
+```bash
+claude mcp add --transport http builder https://THEIR-HOST/mcp/ --header "Authorization: Bearer mbp_..."
+```
+
+**C. From code (any language).** Call the HTTP API with a personal token:
+
+```bash
+ID=$(curl -s -H "Authorization: Bearer $BUILDER_TOKEN" -F file=@clip.mp4 $BUILDER_URL/files | jq -r .id)
+curl -s -H "Authorization: Bearer $BUILDER_TOKEN" -H 'content-type: application/json' \
+  -X POST $BUILDER_URL/ops/trim -d "{\"file_id\":\"$ID\",\"start\":2,\"duration\":5}"
+```
+
+`GET /operations` returns every operation with its JSON schema. Read it rather than guessing parameters.
+
+## Working with the MCP tools
+
+- Files are referenced by id. `import_path` copies a file in; every operation writes **new** files and
+  returns their ids, and inputs are never changed. `export_file` writes a result back into the project.
+- Check visual results with `view_file` (it shows images or frames) before saying a task is done.
+- For long encodes, pass `wait=false` and poll `get_job`.
+- `ask_assistant` hands a whole job to Rivet. Pass the returned `session_id` back to continue.
+
+## Extending Builder (when working in this repo)
+
+Read `CLAUDE.md` first. A new operation is a params model plus an `@operation` function in
+`media_backend/ops.py` that wraps its ffmpeg call in `_guarded(...)`. It appears in the API, Rivet and
+the MCP connector automatically. Add a test in `tests/test_ops.py` and run `pytest -q`.
+Only original characters and assets: don't recreate trademarked characters.

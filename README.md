@@ -13,6 +13,18 @@ An audio/video processing backend you can reuse from any project. It has three p
 All three share one operation registry (`media_backend/ops.py`), so a new operation shows up in the
 API, the assistant and Claude Code at once.
 
+## Use Builder from another project
+
+Other Claude Code chats and projects can use Builder in three ways: the MCP connector, the HTTP API,
+or Rivet. The steps are in [`.claude/skills/use-builder/SKILL.md`](.claude/skills/use-builder/SKILL.md).
+A Claude Code session that has this repository attached loads that guide automatically. The quickest
+setup on one machine:
+
+```bash
+pip install "git+https://github.com/JTMauro/builder.git"
+claude mcp add builder -- media-backend mcp
+```
+
 ## Operations
 
 | Operation | What it does |
