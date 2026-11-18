@@ -38,7 +38,7 @@ function Warn($text) { Write-Host "  !!  $text" -ForegroundColor Yellow }
 function Fail($text) {
     Write-Host "`n  FAILED: $text" -ForegroundColor Red
     Write-Host "  See INSTRUCTIONS.txt (Common failures) in packaging\windows."
-    Read-Host "Press Enter to close" | Out-Null
+    if (-not $env:CI) { Read-Host "Press Enter to close" | Out-Null }
     exit 1
 }
 function Run($exe, [string[]]$argList) {
@@ -124,7 +124,7 @@ if ($Phase -eq "all") {
     Say "Update check and tools"
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     $tools = @(
-        @{ id = "Python.Python.3.13"; test = { Get-Command py -ErrorAction SilentlyContinue } },
+        @{ id = "Python.Python.3.13"; test = { $env:BUILDER_PYTHON -or (Get-Command py -ErrorAction SilentlyContinue) } },
         @{ id = "JRSoftware.InnoSetup"; test = { Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" } },
         @{ id = "Microsoft.WindowsSDK.10.0.26100"; test = { Find-SignTool } }
     )
@@ -152,7 +152,10 @@ if ($Phase -eq "all") {
     # ------------------------------------------------------------ 4. compile
     Say "Compile (Python 3.13 + PyInstaller)"
     $venv = Join-Path $Here ".venv"
-    if (-not (Test-Path (Join-Path $venv "Scripts\python.exe"))) { Run py @("-3.13", "-m", "venv", $venv) }
+    if (-not (Test-Path (Join-Path $venv "Scripts\python.exe"))) {
+        if ($env:BUILDER_PYTHON) { Run $env:BUILDER_PYTHON @("-m", "venv", $venv) }   # set by the GitHub workflow
+        else { Run py @("-3.13", "-m", "venv", $venv) }
+    }
     $py = Join-Path $venv "Scripts\python.exe"
     Run $py @("-m", "pip", "install", "-q", "-U", "pip")
     Run $py @("-m", "pip", "install", "-q", "-U", $Root, "-r", (Join-Path $Here "requirements-windows.txt"))
@@ -300,5 +303,7 @@ if ($Unsigned) { Write-Host "Publisher : (unsigned test build)" -ForegroundColor
 else { Write-Host "Publisher : Cydcor LLC (signed with: $($signing.mode))" -ForegroundColor Green }
 Write-Host "Version   : $Version"
 Get-ChildItem $Out -File | ForEach-Object { Write-Host ("  {0,-44} {1,8:N1} MB" -f $_.Name, ($_.Length / 1MB)) }
-Start-Process explorer.exe $Out
-Read-Host "Press Enter to close" | Out-Null
+if (-not $env:CI) {
+    Start-Process explorer.exe $Out
+    Read-Host "Press Enter to close" | Out-Null
+}

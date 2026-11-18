@@ -1,0 +1,80 @@
+# Builder for Windows: build, sign with the Cydcor certificate, and publish the installers.
+# Runs on GitHub's Windows machines when a version tag (v0.2.0, ...) is pushed, or by hand
+# (Actions > Windows release > Run workflow). It runs the same build_signed_installer.ps1 as
+# "BUILD BUILDER.cmd" on a build PC.
+#
+# Repository secrets (Settings > Secrets and variables > Actions):
+#   CYDCOR_SIGNING_PFX           the certificate with its private key (.pfx), base64-encoded
+#   CYDCOR_SIGNING_PFX_PASSWORD  the .pfx password
+# Without them the workflow still builds, but the files are unsigned.
+name: Windows release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    # Never let a fork's code near the signing secrets.
+    if: github.repository == 'JTMauro/Builder'
+    env:
+      HAS_PFX: ${{ secrets.CYDCOR_SIGNING_PFX != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        id: py
+        with:
+          python-version: "3.13"
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Import the Cydcor signing certificate
+        if: env.HAS_PFX == 'true'
+        env:
+          PFX: ${{ secrets.CYDCOR_SIGNING_PFX }}
+          PFX_PASSWORD: ${{ secrets.CYDCOR_SIGNING_PFX_PASSWORD }}
+        shell: pwsh
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP "cydcor.pfx"
+          [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:PFX))
+          $pw = ConvertTo-SecureString $env:PFX_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $path -CertStoreLocation Cert:\CurrentUser\My -Password $pw
+          Remove-Item $path -Force
+          Write-Host "Imported: $($cert.Subject) $($cert.Thumbprint) expires $($cert.NotAfter)"
+
+      - name: Build, sign, package and verify
+        shell: powershell
+        env:
+          CI: "true"
+          BUILDER_PYTHON: ${{ steps.py.outputs.python-path }}
+        run: |
+          $flags = @("-SkipUpdateCheck")
+          if ($env:HAS_PFX -ne "true") { $flags += "-Unsigned"; Write-Host "::warning::No signing secrets: building UNSIGNED files." }
+          & .\packaging\windows\build_signed_installer.ps1 @flags
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Remove the certificate from the machine
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*Cydcor*" } | Remove-Item -Force -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Builder-Windows
+          path: packaging/windows/installer/Output/
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packaging/windows/installer/Output/*
+          body_path: packaging/windows/installer/Output/DEPLOY.md
