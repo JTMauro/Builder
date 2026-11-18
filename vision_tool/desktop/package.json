@@ -1,0 +1,8 @@
+{
+  "name": "visuvius-desktop",
+  "version": "0.1.0",
+  "description": "Visuvius: eye tests and system-wide text scaling with automatic revert (Windows)",
+  "main": "main.js",
+  "scripts": { "start": "electron ." },
+  "devDependencies": { "electron": "33.2.1" }
+}
