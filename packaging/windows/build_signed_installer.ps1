@@ -196,6 +196,18 @@ if ($Phase -eq "all") {
     Get-ChildItem $ffTmp -Recurse -Include LICENSE*, README* | Select-Object -First 2 | Copy-Item -Destination $ffDest
     $Versions["ffmpeg"] = ((& (Join-Path $ffDest "ffmpeg.exe") -version) | Select-Object -First 1) -replace "ffmpeg version ", "" -replace " Copyright.*", ""
 
+    # cloudflared (remote access): Cloudflare's own signed build. It's accepted only if Cloudflare's signature is valid.
+    $cfExe = Join-Path $Cache "cloudflared.exe"
+    Invoke-WebRequest "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cfExe -UseBasicParsing
+    $cfSig = Get-AuthenticodeSignature $cfExe
+    if ($cfSig.Status -ne "Valid" -or $cfSig.SignerCertificate.Subject -notlike "*Cloudflare*") {
+        Fail "The downloaded cloudflared.exe isn't validly signed by Cloudflare ($($cfSig.Status), $($cfSig.SignerCertificate.Subject))."
+    }
+    $cfDest = Join-Path $Dist "cloudflared"
+    New-Item -ItemType Directory -Force -Path $cfDest | Out-Null
+    Copy-Item $cfExe $cfDest
+    $Versions["cloudflared"] = ((& $cfExe --version) | Select-Object -First 1)
+
     $engDest = Join-Path $Dist "engine"
     New-Item -ItemType Directory -Force -Path $engDest | Out-Null
     $prebuilt = Join-Path $Here "prebuilt\craft-anything-cli.exe"
@@ -268,6 +280,7 @@ Compress-Archive -Path $Dist -DestinationPath $portable -Force
 Say "Verify"
 $check = @(Get-ChildItem $Out -Filter *.exe) + @(Get-Item (Join-Path $Dist "Builder.exe"), (Join-Path $Dist "builder-cli.exe"),
           (Join-Path $Dist "engine\craft-anything-cli.exe"), (Join-Path $Dist "ffmpeg\ffmpeg.exe"))
+# (cloudflared.exe keeps Cloudflare's own signature, checked when it was downloaded.)
 $lines = @("Builder $Version signatures, $(Get-Date -Format 'yyyy-MM-dd HH:mm')", "")
 foreach ($k in $Versions.Keys) { $lines += ("Built with {0}: {1}" -f $k, $Versions[$k]) }
 $lines += ""

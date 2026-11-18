@@ -50,6 +50,7 @@ def main(argv: list[str] | None = None) -> None:
 
         from .api import create_app
 
+        os.environ["BUILDER_PORT"] = str(args.port)  # remote access tunnels to this port
         shown = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
         print(f"Builder is open at http://{shown}:{args.port}/", flush=True)
         uvicorn.run(create_app(), host=args.host, port=args.port)

@@ -1,7 +1,9 @@
 # Deploying Builder {VERSION}
 
-Builder runs on each PC as a local server with a tray icon: web app at http://127.0.0.1:8000,
-HTTP API for other apps, and an MCP connector at /mcp/ for Claude Code. User data (accounts, files,
+Builder is a standalone app: its own window plus a tray icon that keeps the server running (web
+app at http://127.0.0.1:8000, HTTP API for other apps, MCP connector at /mcp/ for Claude). Optional
+remote access (Settings) gives it a secure https address through Cloudflare Tunnel for Claude chats
+and apps elsewhere. User data (accounts, files,
 chats, projects, settings) lives in `%APPDATA%\Builder` and survives upgrades and uninstall.
 
 | Installer | For | Silent install |
@@ -15,10 +17,10 @@ Intune detection: uninstall key `{6B0F3C2E-5D1A-4E7B-9C3F-2A8E4B1D7C55}_is1`, `D
 Uninstall: Settings > Apps > Builder, or `unins000.exe /VERYSILENT` in the install folder.
 
 ## After installing
-1. Builder opens in the browser. Make the first account (it becomes the admin).
-2. Tray icon > **Settings (builder.env)**: paste `ANTHROPIC_API_KEY=...` for Rivet and Craft builds, save, then tray > **Restart**.
-3. Tray icon > **Connect Claude Code…** > Make token, and run the command it shows in a terminal on the same PC:
-   `claude mcp add --transport http builder -s user http://127.0.0.1:8000/mcp/ --header "Authorization: Bearer mbp_..."`
+1. Builder opens in its own window. Make the first account (it becomes the admin).
+2. **Settings** opens by itself: paste the Claude API key (checked with Anthropic, stored only in `%APPDATA%\Builder\builder.env`).
+3. Optional: **Settings > Remote access > Quick** (or a fixed address with your Cloudflare tunnel) so Claude chats anywhere can connect.
+4. **Connect apps & Claude** (account menu or tray): make a token and copy the setup for Claude chats (custom connector address), Claude Code, or another app.
 
 ## Other apps
 Send files with HTTP and a personal token (`Authorization: Bearer mbp_...`):
@@ -34,3 +36,5 @@ public certificate for WDAC/AppLocker publisher rules (`O=Cydcor LLC`).
 ## Bundled third-party programs
 - ffmpeg/ffprobe (gyan.dev release essentials build, GPL v3; license in `ffmpeg\`)
 - Craft Anything engine (`engine\craft-anything-cli.exe`)
+- cloudflared (Cloudflare, Apache 2.0; keeps Cloudflare's own signature) for remote access
+- The app window uses Microsoft Edge WebView2, which is part of Windows 10 and 11

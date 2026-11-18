@@ -104,6 +104,13 @@ def media_plugin_spec() -> dict[str, Any]:
     }
 
 
+def reset_ai() -> None:
+    """Re-run ensure_ai() on the next build (after the Claude API key changed)."""
+    global _ai_ready
+    with _setup_lock:
+        _ai_ready = False
+
+
 def ensure_ai() -> None:
     """Once per server start: give the engine a Claude backend from the server's ANTHROPIC_API_KEY,
     and plug Builder's audio/video tools into it."""

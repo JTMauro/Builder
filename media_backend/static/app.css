@@ -467,3 +467,10 @@ dialog { width: min(560px, 94vw); }
 .status-dot.waiting { background: #d6a016; animation: pulse 1s infinite; }
 .status-dot.done { background: var(--ok); } .status-dot.failed { background: var(--bad); }
 @media (max-width: 760px) { .build-form { grid-template-columns: 1fr; } .pipeline { grid-template-columns: repeat(2, 1fr); } }
+
+.connect-way { padding: 10px 0 12px; border-bottom: 1px solid rgba(127,127,127,.18); }
+.connect-way:last-child { border-bottom: 0; padding-bottom: 0; }
+.connect-way p { margin: 0 0 6px; }
+#settings-dialog .field.check span { font-weight: 400; }
+#remote-form .field.check { grid-column: 1 / -1; flex-direction: row; align-items: flex-start; gap: 10px; padding: 8px 10px; }
+#remote-form input[type="radio"] { appearance: auto; -webkit-appearance: radio; width: 16px; height: 16px; flex: none; margin: 3px 0 0; padding: 0; box-shadow: none; background: none; accent-color: var(--accent, #f07828); }

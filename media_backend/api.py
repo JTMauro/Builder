@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import hmac
+import os
 from typing import Any
 
 from pathlib import Path
@@ -15,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
 from . import __version__, ops, storage
-from . import craft
+from . import craft, remote, settings_file
 from .assistant import AssistantNotConfigured, ChatNotFound, ChatResult, get_assistant
 from .config import get_settings
 from .jobs import Job, get_queue
@@ -23,7 +24,9 @@ from .mcp_server import build_server
 from .users import AuthError, User, get_store
 
 COOKIE = "builder_session"
-PUBLIC_PATHS = {"/", "/health", "/favicon.ico", "/auth/status", "/auth/login", "/auth/setup", "/auth/signup",
+# Hooks the desktop app (winapp) sets, e.g. "show": bring Builder's window forward.
+DESKTOP: dict[str, Any] = {}
+PUBLIC_PATHS = {"/", "/health", "/_desktop/show", "/favicon.ico", "/auth/status", "/auth/login", "/auth/setup", "/auth/signup",
                 "/docs", "/openapi.json"}
 # Stand-in identities when a request isn't from a signed-in person.
 LOCAL_USER = User(id=0, username="local", display_name="Local", is_admin=True, created_at=0)
@@ -74,10 +77,51 @@ class BuildAnswer(BaseModel):
     always: bool = False
 
 
+class ClaudeKey(BaseModel):
+    key: str
+
+
+class RemoteSettings(BaseModel):
+    mode: str  # off, quick, named
+    tunnel_token: str = ""  # named tunnels only; kept if left empty
+    public_url: str = ""
+
+
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
     file_ids: list[str] | None = None
+
+
+def _server_port(request: Request) -> int:
+    server = request.scope.get("server") or ("127.0.0.1", 8000)
+    return int(os.environ.get("BUILDER_PORT") or server[1] or 8000)
+
+
+def _key_changed() -> None:
+    """Use a new or removed Claude API key straight away: Rivet's client and the engine's AI set-up."""
+    get_assistant()._client = None
+    craft.reset_ai()
+
+
+def _start_remote_from_settings() -> None:
+    mode = os.environ.get("BUILDER_REMOTE", "off")
+    if mode not in ("quick", "named"):
+        return
+    if not get_settings().auth_enabled or get_store().count() == 0:
+        return  # never put an unprotected server on the internet
+
+    def go() -> None:
+        try:
+            remote.get_tunnel().start(mode, int(os.environ.get("BUILDER_PORT") or 8000),
+                                      token=os.environ.get("BUILDER_TUNNEL_TOKEN", ""),
+                                      public_url=os.environ.get("BUILDER_PUBLIC_URL", ""))
+        except remote.RemoteError as e:
+            remote.get_tunnel().error = str(e)
+
+    import threading
+
+    threading.Thread(target=go, daemon=True, name="remote-start").start()
 
 
 def create_app() -> FastAPI:
@@ -88,8 +132,12 @@ def create_app() -> FastAPI:
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
+        _start_remote_from_settings()
         async with mcp.session_manager.run():
-            yield
+            try:
+                yield
+            finally:
+                remote.get_tunnel().stop()
 
     app = FastAPI(
         title="Builder API", version=__version__, lifespan=lifespan,
@@ -124,6 +172,20 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def auth(request: Request, call_next):
         path = request.url.path
+        if path.startswith("/c/"):
+            # Claude connectors can't send an Authorization header, so their address carries a personal
+            # token: /c/<token>/mcp/... is the MCP connector, acting as that token's person.
+            _, _, token, rest = (path.split("/", 3) + [""])[:4]
+            user = get_store().user_for_api_token(token) if token else None
+            if user is None or not (rest == "mcp" or rest.startswith("mcp/")):
+                return JSONResponse({"detail": "Unknown or revoked connector link"}, status_code=401)
+            new_path = "/" + rest
+            request.scope["path"] = new_path
+            request.scope["raw_path"] = new_path.encode()
+            headers = [(k, v) for k, v in request.scope["headers"] if k != b"authorization"]
+            request.scope["headers"] = headers + [(b"authorization", f"Bearer {token}".encode())]
+            request.state.user = user
+            return await call_next(request)
         if request.method == "OPTIONS" and get_settings().cors_origins:
             return await call_next(request)  # CORS preflight carries no credentials
         if path in PUBLIC_PATHS or path.startswith("/static/"):
@@ -256,6 +318,75 @@ def create_app() -> FastAPI:
         if not get_store().delete_api_token(user.id, token_id):
             raise HTTPException(404, "No such token")
 
+    # ------------------------------------------------------------ settings (admins)
+
+    def _key_hint(key: str) -> str:
+        return f"{key[:7]}…{key[-4:]}" if len(key) > 12 else "set"
+
+    @app.get("/settings")
+    def get_app_settings(request: Request, _: User = Depends(admin_user)):
+        key = os.environ.get("ANTHROPIC_API_KEY", "")
+        saved = settings_file.read_env_file(settings_file.env_path())
+        return {
+            "version": __version__,
+            "data_dir": str(get_settings().data_dir),
+            "claude_key": {"set": bool(key), "hint": _key_hint(key) if key else ""},
+            "remote": {**remote.get_tunnel().status(), "configured": saved.get("BUILDER_REMOTE", "off"),
+                       "public_url": saved.get("BUILDER_PUBLIC_URL", ""),
+                       "tunnel_token_set": bool(saved.get("BUILDER_TUNNEL_TOKEN"))},
+        }
+
+    @app.put("/settings/claude-key")
+    def set_claude_key(body: ClaudeKey, _: User = Depends(admin_user)):
+        key = body.key.strip()
+        if not key.startswith("sk-ant-") or len(key) < 30 or any(c.isspace() for c in key):
+            raise HTTPException(422, "That doesn't look like a Claude API key (they start with sk-ant-).")
+        warning = ""
+        try:
+            anthropic.Anthropic(api_key=key, max_retries=1, timeout=20).models.list(limit=1)
+        except anthropic.AuthenticationError:
+            raise HTTPException(422, "Anthropic didn't accept this key. Check it in the Claude Console and paste it again.")
+        except anthropic.PermissionDeniedError:
+            raise HTTPException(422, "This key isn't allowed to use the API (permission denied).")
+        except anthropic.APIConnectionError:
+            warning = "Saved, but Builder couldn't reach Anthropic to check it. Check the internet connection."
+        settings_file.save_secret("ANTHROPIC_API_KEY", key)
+        _key_changed()
+        return {"set": True, "hint": _key_hint(key), "warning": warning}
+
+    @app.delete("/settings/claude-key", status_code=204)
+    def clear_claude_key(_: User = Depends(admin_user)):
+        settings_file.save_secret("ANTHROPIC_API_KEY", "")
+        _key_changed()
+
+    @app.put("/settings/remote")
+    def set_remote(body: RemoteSettings, request: Request, _: User = Depends(admin_user)):
+        if body.mode not in remote.MODES:
+            raise HTTPException(422, "mode must be off, quick or named")
+        if body.mode != "off" and (not get_settings().auth_enabled or get_store().count() == 0):
+            raise HTTPException(400, "Remote access needs sign-in on and at least one account.")
+        path = settings_file.env_path()
+        token = body.tunnel_token.strip() or settings_file.read_env_file(path).get("BUILDER_TUNNEL_TOKEN", "")
+        public = body.public_url.strip().rstrip("/")
+        if body.mode == "named" and body.tunnel_token.strip():
+            settings_file.save_secret("BUILDER_TUNNEL_TOKEN", token)
+        if body.mode == "named":
+            settings_file.save_secret("BUILDER_PUBLIC_URL", public)
+        try:
+            status = remote.get_tunnel().start(body.mode, _server_port(request), token=token, public_url=public)
+        except remote.RemoteError as e:
+            settings_file.save_secret("BUILDER_REMOTE", "off")
+            raise HTTPException(422, str(e))
+        settings_file.save_secret("BUILDER_REMOTE", body.mode)
+        return status
+
+    # ------------------------------------------------------------ connect (everyone signed in)
+
+    @app.get("/connect/info")
+    def connect_info(request: Request, _: User = Depends(current_user)):
+        base = str(request.base_url).rstrip("/")
+        return {"local_url": base, "public_url": remote.public_url(), "remote": remote.get_tunnel().status()["mode"]}
+
     @app.exception_handler(storage.FileNotFound)
     async def _nf(_req, exc):
         return JSONResponse({"detail": f"No file with id {exc}"}, status_code=404)
@@ -269,6 +400,15 @@ def create_app() -> FastAPI:
         return JSONResponse({"detail": exc.errors(include_url=False, include_context=False)}, status_code=422)
 
     # ------------------------------------------------------------ meta
+
+    @app.post("/_desktop/show", include_in_schema=False, status_code=204)
+    def desktop_show(request: Request):
+        """A second start of Builder.exe asks the running one to show its window. Only from this computer:
+        tunnel traffic also arrives from 127.0.0.1 but always carries Cloudflare's header."""
+        local = request.client is not None and request.client.host in ("127.0.0.1", "::1")
+        if not local or "cf-connecting-ip" in request.headers or "show" not in DESKTOP:
+            raise HTTPException(404)
+        DESKTOP["show"]()
 
     @app.get("/health")
     def health():

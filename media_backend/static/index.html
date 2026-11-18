@@ -110,7 +110,8 @@
             <span class="avatar" id="user-avatar">?</span><span id="user-name"></span><span class="caret">▾</span>
           </button>
           <div id="user-menu" class="menu" role="menu" hidden>
-            <button type="button" role="menuitem" data-action="tokens">🔌 Connect Claude Code</button>
+            <button type="button" role="menuitem" data-action="tokens">🔌 Connect apps &amp; Claude</button>
+            <button type="button" role="menuitem" data-action="settings" id="menu-settings" hidden>⚙️ Settings</button>
             <button type="button" role="menuitem" data-action="users" id="menu-users" hidden>👥 Manage people</button>
             <button type="button" role="menuitem" data-action="password">🔑 Change password</button>
             <button type="button" role="menuitem" data-action="logout">🚪 Sign out</button>
@@ -257,19 +258,47 @@
 
   <dialog id="tokens-dialog">
     <div class="dialog-body">
-      <div class="op-form-head"><h3>Connect Claude Code</h3><button class="btn ghost small" data-close>✕</button></div>
-      <p class="muted">Make a personal token so Claude Code, in any project or chat, or another app can use Builder as you. Each token is shown once.</p>
+      <div class="op-form-head"><h3>Connect apps &amp; Claude</h3><button class="btn ghost small" data-close>✕</button></div>
+      <p class="muted">Make a personal token, then pick where you're connecting from. Whatever connects acts as you, and each token is shown once. Revoke a token below to cut off whatever uses it.</p>
       <form id="token-form" class="inline-form">
-        <input id="token-name" placeholder="Token name, e.g. My laptop" maxlength="60">
+        <input id="token-name" placeholder="What it's for, e.g. Claude chats, My game, Laptop" maxlength="60">
         <button class="btn primary small" type="submit">Make token</button>
       </form>
       <div id="token-new" class="token-new" hidden>
-        <p><strong>Copy this command into a terminal on your computer:</strong></p>
-        <pre id="token-cmd"></pre>
-        <button class="btn ghost small" id="token-copy" type="button">Copy command</button>
+        <div id="connect-ways"></div>
       </div>
       <h4 class="section-label">Your tokens</h4>
       <div id="token-list" class="rows"></div>
+    </div>
+  </dialog>
+
+  <dialog id="settings-dialog">
+    <div class="dialog-body">
+      <div class="op-form-head"><h3>Settings</h3><button class="btn ghost small" data-close>✕</button></div>
+
+      <h4 class="section-label">Claude API key</h4>
+      <p class="muted">Rivet and Craft builds use it. It's checked with Anthropic, then kept only on this computer, in Builder's settings file. It's never shown again in full.</p>
+      <p id="key-state" class="small-text"></p>
+      <form id="key-form" class="inline-form">
+        <input id="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-...">
+        <button class="btn primary small" type="submit">Save key</button>
+        <button class="btn ghost small" type="button" id="key-remove" hidden>Remove</button>
+      </form>
+      <p id="key-status" class="muted small-text"></p>
+
+      <h4 class="section-label">Remote access</h4>
+      <p class="muted">Gives Builder a secure https address through Cloudflare, so Claude chats anywhere and apps on other networks can connect. Every request still needs a sign-in or a personal token.</p>
+      <form id="remote-form" class="fields">
+        <label class="field check"><input type="radio" name="remote-mode" value="off" checked><span><strong>Off</strong>: this computer only (and your network, if allowed in the tray menu)</span></label>
+        <label class="field check"><input type="radio" name="remote-mode" value="quick"><span><strong>Quick</strong>: no account needed; the address changes each time Builder starts</span></label>
+        <label class="field check"><input type="radio" name="remote-mode" value="named"><span><strong>Fixed address</strong>: your own Cloudflare tunnel, and the address never changes</span></label>
+        <div id="named-fields" class="fields wide" hidden>
+          <label class="field wide"><span>Tunnel token (Cloudflare: Zero Trust › Networks › Tunnels › your tunnel › Install connector)</span><input id="tunnel-token" type="password" autocomplete="off" placeholder="Leave empty to keep the saved one"></label>
+          <label class="field wide"><span>Its public address</span><input id="public-url" placeholder="https://builder.example.com"></label>
+        </div>
+        <div class="field wide"><button class="btn primary small" type="submit">Apply</button> <span id="remote-status" class="muted"></span></div>
+      </form>
+      <p class="muted small-text" id="settings-foot"></p>
     </div>
   </dialog>
 

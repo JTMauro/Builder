@@ -1,6 +1,6 @@
 [project]
 name = "media-backend"
-version = "0.2.0"
+version = "0.3.0"
 description = "Audio/video processing backend with a built-in Claude assistant and an MCP connector for Claude Code."
 requires-python = ">=3.10"
 dependencies = [

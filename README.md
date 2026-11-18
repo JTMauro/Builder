@@ -112,18 +112,27 @@ An audio/video processing backend you can reuse from any project. It has three p
 All three share one operation registry (`media_backend/ops.py`), so a new operation shows up in the
 API, the assistant and Claude Code at once.
 
-## Windows desktop server (Builder.exe)
+## Windows app (Builder.exe)
 
-On Windows, Builder installs as a desktop server: `Builder.exe` runs the web app, the HTTP API and the
-MCP connector on http://127.0.0.1:8000 and sits in the tray (Open Builder, Connect Claude Code…,
-Settings, Start with Windows, Let other devices connect, Restart, Quit). ffmpeg and the Craft engine
-ship inside the install folder; nothing else needs installing.
+On Windows, Builder is a standalone app: `Builder.exe` opens Builder in its own window and keeps the
+server running in the tray when the window is closed (tray menu: Open Builder, Connect apps & Claude…,
+Settings…, Start with Windows, Let other devices on my network connect, Restart, Quit). ffmpeg, the
+Craft engine and cloudflared ship inside the install folder; nothing else needs installing.
 
-- **You:** open Builder from the tray or Start menu.
-- **Other apps:** send files to the HTTP API with a personal token (see HTTP API below).
-- **Claude Code on that PC:** tray > Connect Claude Code… > Make token, then run the command it shows.
-- Settings are in `%APPDATA%\Builder\builder.env` (API key, port, network access, allowed folders);
-  accounts, files and chats are in `%APPDATA%\Builder` too, so upgrades and reinstalls keep them.
+- **First start:** make the first account (the admin). Settings opens by itself: paste your Claude API
+  key there. It's checked with Anthropic, then kept only in `%APPDATA%\Builder\builder.env`, and never
+  shown again in full.
+- **Remote access (Settings):** gives Builder a secure https address through Cloudflare Tunnel.
+  *Quick* needs no account, but the address changes each start. *Fixed address* uses your own
+  Cloudflare tunnel token and hostname. Every request still needs a sign-in or a personal token.
+- **Connect apps & Claude:** make a personal token, then copy the setup for where you're connecting from:
+  - **Claude chats anywhere** (claude.ai, the Claude apps, Claude Code on the web): a connector address
+    `https://<your address>/c/<token>/mcp/`. In Claude go to Settings › Connectors › Add custom
+    connector. The token is in the address because connectors can't send headers; revoke it to cut
+    the link.
+  - **Claude Code on this or another computer:** a `claude mcp add --transport http ...` command.
+  - **Other apps:** the address plus `Authorization: Bearer <token>` for the HTTP API (`/docs`).
+- Accounts, files, chats, projects and settings live in `%APPDATA%\Builder`, so upgrades keep them.
 - `builder-cli.exe` in the install folder is the command line (`mcp`, `token`, `user add`, `doctor`,
   `app --selftest`). `builder app` runs the same tray server from source on any system.
 

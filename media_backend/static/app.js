@@ -791,6 +791,16 @@ function showUser(user) {
   $("#user-name").textContent = user.display_name;
   $("#user-avatar").textContent = (user.display_name || user.username).trim().charAt(0).toUpperCase();
   $("#menu-users").hidden = !user.is_admin;
+  $("#menu-settings").hidden = !user.is_admin;
+  // First visit as an admin with no Claude API key: open Settings so it can be added straight away.
+  if (user.is_admin && location.hash !== "#connect") {
+    api("/settings").then((st) => {
+      let asked = false;
+      try { asked = localStorage.getItem("builder-asked-key") === "1"; localStorage.setItem("builder-asked-key", "1"); } catch {}
+      if (!st.claude_key.set && !asked) openSettings();
+    }).catch(() => {});
+  }
+  if (location.hash === "#settings" && user.is_admin) { history.replaceState(null, "", location.pathname); openSettings(); }
   // The desktop app's tray menu opens Builder at #connect: go straight to Connect Claude Code.
   if (location.hash === "#connect") { history.replaceState(null, "", location.pathname); openTokens(); }
 }
@@ -811,6 +821,7 @@ menu.addEventListener("click", async (e) => {
     showLogin();
   } else if (action === "tokens") { openTokens(); }
   else if (action === "users") { openUsers(); }
+  else if (action === "settings") { openSettings(); }
   else if (action === "password") { $("#password-form").reset(); $("#pw-status").textContent = ""; $("#password-dialog").showModal(); }
 });
 
@@ -828,18 +839,100 @@ async function renderTokens() {
     h("button", { class: "btn ghost small", type: "button", text: "Revoke", onclick: async () => { await api(`/auth/tokens/${t.id}`, { method: "DELETE" }); renderTokens(); } })))
     : [h("div", { class: "muted small-text", text: "No tokens yet." })]));
 }
+function copyBlock(title, text, note) {
+  const pre = h("pre", { text });
+  const btn = h("button", { class: "btn ghost small", type: "button", text: "Copy" });
+  btn.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(text); btn.textContent = "Copied ✓"; }
+    catch { btn.textContent = "Select and copy the text above"; }
+    setTimeout(() => { btn.textContent = "Copy"; }, 2000);
+  });
+  return h("div", { class: "connect-way" }, h("p", {}, h("strong", { text: title })), note ? h("p", { class: "muted small-text", text: note }) : null, pre, btn);
+}
+async function showConnectWays(token) {
+  const info = await api("/connect/info").catch(() => ({ local_url: location.origin, public_url: "" }));
+  const local = info.local_url || location.origin;
+  const pub = info.public_url;
+  const ways = [];
+  if (pub) {
+    ways.push(copyBlock("Claude chats anywhere: claude.ai, the Claude apps, Claude Code on the web",
+      `${pub}/c/${token}/mcp/`,
+      "In Claude: Settings › Connectors › Add custom connector, name it Builder and paste this address. Every chat, including Claude Code on the web, can then use Builder's tools. The address holds your token, so keep it private."));
+    ways.push(copyBlock("Claude Code on another computer",
+      `claude mcp add --transport http builder -s user ${pub}/mcp/ --header "Authorization: Bearer ${token}"`));
+  } else {
+    ways.push(h("div", { class: "connect-way" }, h("p", {}, h("strong", { text: "Claude chats anywhere" })),
+      h("p", { class: "muted small-text", text: state.user && state.user.is_admin
+        ? "Turn on Remote access in ⚙️ Settings first, then make a token here to get a connector address for claude.ai and Claude Code on the web."
+        : "Ask an admin to turn on Remote access in Settings; then make a token here to get a connector address." })));
+  }
+  ways.push(copyBlock("Claude Code on this computer",
+    `claude mcp add --transport http builder -s user ${local}/mcp/ --header "Authorization: Bearer ${token}"`));
+  const base = pub || local;
+  ways.push(copyBlock("Other apps (HTTP API, full reference at /docs)",
+    `Address:  ${base}\nHeader:   Authorization: Bearer ${token}\n\ncurl -H "Authorization: Bearer ${token}" -F file=@clip.mp4 ${base}/files\ncurl -H "Authorization: Bearer ${token}" ${base}/operations`,
+    pub ? "Apps on this computer can use the local address instead: " + local : "Apps on other networks need Remote access on."));
+  $("#connect-ways").replaceChildren(...ways);
+  $("#token-new").hidden = false;
+}
 $("#token-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const t = await api("/auth/tokens", { method: "POST", json: { name: $("#token-name").value.trim() || "Claude Code" } });
+  const t = await api("/auth/tokens", { method: "POST", json: { name: $("#token-name").value.trim() || "Claude" } });
   $("#token-name").value = "";
-  $("#token-cmd").textContent = `claude mcp add --transport http builder -s user ${location.origin}/mcp/ --header "Authorization: Bearer ${t.token}"`;
-  $("#token-new").hidden = false;
+  await showConnectWays(t.token);
   renderTokens();
 });
-$("#token-copy").addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText($("#token-cmd").textContent); $("#token-copy").textContent = "Copied ✓"; }
-  catch { $("#token-copy").textContent = "Select and copy the text above"; }
-  setTimeout(() => { $("#token-copy").textContent = "Copy command"; }, 2000);
+
+/* settings (admins): Claude API key and remote access */
+async function openSettings() {
+  $("#key-status").textContent = ""; $("#remote-status").textContent = ""; $("#key-input").value = "";
+  $("#settings-dialog").showModal();
+  await renderSettings();
+}
+async function renderSettings() {
+  const st = await api("/settings").catch((e) => { $("#key-status").textContent = e.message; return null; });
+  if (!st) return;
+  $("#key-state").textContent = st.claude_key.set ? `✓ A key is saved (${st.claude_key.hint}).` : "No key yet: Rivet and Craft builds won't work until you add one.";
+  $("#key-remove").hidden = !st.claude_key.set;
+  const r = st.remote;
+  const mode = r.running ? r.mode : (r.configured || "off");
+  document.querySelectorAll('input[name="remote-mode"]').forEach((i) => { i.checked = i.value === mode; });
+  $("#named-fields").hidden = mode !== "named";
+  $("#public-url").value = r.public_url || "";
+  $("#tunnel-token").placeholder = r.tunnel_token_set ? "Saved. Leave empty to keep it" : "Paste the tunnel token";
+  $("#remote-status").textContent = r.running ? `On: ${r.url}` : r.error ? `⚠ ${r.error}` : (r.available ? "Off" : "Off (cloudflared isn't installed here)");
+  $("#settings-foot").textContent = `Builder ${st.version} · data in ${st.data_dir}`;
+}
+document.querySelectorAll('input[name="remote-mode"]').forEach((i) => i.addEventListener("change", () => {
+  $("#named-fields").hidden = $('input[name="remote-mode"]:checked').value !== "named";
+}));
+$("#key-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const key = $("#key-input").value.trim();
+  if (!key) return;
+  $("#key-status").textContent = "Checking the key with Anthropic…";
+  try {
+    const r = await api("/settings/claude-key", { method: "PUT", json: { key } });
+    $("#key-input").value = "";
+    $("#key-status").textContent = r.warning || "Saved. Rivet and Craft builds can use it now.";
+    renderSettings();
+  } catch (err) { $("#key-status").textContent = `⚠ ${err.message}`; }
+});
+$("#key-remove").addEventListener("click", async () => {
+  if (!confirm("Remove the Claude API key from this computer?")) return;
+  await api("/settings/claude-key", { method: "DELETE" });
+  $("#key-status").textContent = "Removed.";
+  renderSettings();
+});
+$("#remote-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const mode = $('input[name="remote-mode"]:checked').value;
+  $("#remote-status").textContent = mode === "off" ? "Turning off…" : "Connecting to Cloudflare…";
+  try {
+    const r = await api("/settings/remote", { method: "PUT", json: { mode, tunnel_token: $("#tunnel-token").value.trim(), public_url: $("#public-url").value.trim() } });
+    $("#tunnel-token").value = "";
+    $("#remote-status").textContent = r.running ? `On: ${r.url}. Make a token in 🔌 Connect to get connector addresses.` : "Off";
+  } catch (err) { $("#remote-status").textContent = `⚠ ${err.message}`; }
 });
 
 /* people (admins) */

@@ -34,99 +34,13 @@ import webbrowser
 from pathlib import Path
 
 from . import __version__
-from .config import FROZEN, IS_WINDOWS, NO_WINDOW, _default_data_dir, app_dir, exe_name
+from .config import FROZEN, IS_WINDOWS, NO_WINDOW, app_dir, exe_name
+from .settings_file import data_dir, env_path, load_settings, set_env_value
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_NAME = "Builder"
 
-ENV_TEMPLATE = """\
-# Builder settings: one KEY=value per line. Restart Builder (tray icon > Restart) after changing them.
-# Lines starting with # are ignored.
-
-# Claude API key for Rivet and Craft builds (https://console.anthropic.com/).
-# ANTHROPIC_API_KEY=
-
-# Port Builder listens on.
-BUILDER_PORT=8000
-
-# 127.0.0.1 = only this computer. 0.0.0.0 = other devices on your network too (they still sign in).
-BUILDER_HOST=127.0.0.1
-
-# Folders Claude Code may import media from and export results to (separate several with ;).
-# Empty means your user folder.
-MEDIA_BACKEND_ALLOWED_DIRS=
-
-# Web apps on other sites that may call Builder from a browser, comma-separated (or *).
-# MEDIA_BACKEND_CORS_ORIGINS=
-
-# Let anyone who can reach Builder make an account from the sign-in screen.
-# MEDIA_BACKEND_OPEN_SIGNUP=off
-"""
-
 log = logging.getLogger("builder.app")
-
-
-# ---------------------------------------------------------------- settings file
-
-
-def data_dir() -> Path:
-    return Path(os.environ.get("MEDIA_BACKEND_DATA") or _default_data_dir()).expanduser()
-
-
-def env_path() -> Path:
-    return data_dir() / "builder.env"
-
-
-def read_env_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    try:
-        text = path.read_text(encoding="utf-8-sig")
-    except OSError:
-        return values
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key, value = key.strip(), value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        if key:
-            values[key] = value
-    return values
-
-
-def set_env_value(path: Path, key: str, value: str) -> None:
-    """Change one setting in builder.env, keeping the rest of the file (and its comments) as it is."""
-    lines = path.read_text(encoding="utf-8-sig").splitlines() if path.exists() else []
-    out, done = [], False
-    for line in lines:
-        bare = line.strip().lstrip("#").strip()
-        if bare.split("=", 1)[0].strip() == key and "=" in bare and not done:
-            out.append(f"{key}={value}")
-            done = True
-        else:
-            out.append(line)
-    if not done:
-        out.append(f"{key}={value}")
-    path.write_text("\n".join(out) + "\n", encoding="utf-8")
-
-
-def load_settings() -> dict[str, str]:
-    """Create builder.env on first run, then copy its values into the environment.
-    Values already set in the real environment win, so a script can still override them."""
-    path = env_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        path.write_text(ENV_TEMPLATE, encoding="utf-8")
-    values = read_env_file(path)
-    for k, v in values.items():
-        if v != "" and not os.environ.get(k):
-            os.environ[k] = v
-    # A tray app's working folder means nothing to the person, so default to their user folder.
-    if not os.environ.get("MEDIA_BACKEND_ALLOWED_DIRS"):
-        os.environ["MEDIA_BACKEND_ALLOWED_DIRS"] = str(Path.home())
-    return values
 
 
 def setup_logging() -> Path:
@@ -160,6 +74,10 @@ def builder_at(port: int, timeout: float = 1.0) -> bool:
 
 def port_free(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if not IS_WINDOWS:
+            # Like uvicorn: connections from a just-stopped Builder linger in TIME_WAIT and must not count as
+            # "in use". (On Windows this option would let two programs share a port, so it's left off there.)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("" if host == "0.0.0.0" else host, port))
             return True
@@ -278,23 +196,62 @@ def relaunch(argv: list[str]) -> None:
     subprocess.Popen(cmd, close_fds=True, **({"creationflags": 0x00000008} if IS_WINDOWS else {}))  # DETACHED
 
 
-def run_tray(server: Server, argv: list[str]) -> None:
+def window_available() -> bool:
+    """Builder's own window needs pywebview (Edge WebView2 on Windows, built into Windows 10 and 11)."""
+    if os.environ.get("BUILDER_WINDOW", "on").lower() in ("off", "0", "no", "browser"):
+        return False
+    try:
+        import webview  # noqa: F401
+
+        return IS_WINDOWS or sys.platform == "darwin"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def run_desktop(server: Server, argv: list[str], show: bool) -> None:
+    """The tray icon, plus Builder's own window when available (otherwise pages open in the browser).
+    Closing the window keeps Builder running in the tray; Quit in the tray menu stops it."""
     import pystray
 
-    restart = {"on": False}
+    state = {"restart": False, "quitting": False}
+    window = None
+    if window_available():
+        import webview
 
-    def open_builder(icon=None, item=None):
+        window = webview.create_window("Builder", server.url, width=1320, height=880, min_size=(960, 640),
+                                       hidden=not show, text_select=True)
+
+        def on_closing():
+            if state["quitting"]:
+                return True
+            window.hide()  # keep serving apps and Claude in the background
+            return False
+
+        window.events.closing += on_closing
+    elif show:
         webbrowser.open(server.url)
 
-    def connect(icon, item):
-        webbrowser.open(server.url + "#connect")
-        icon.notify("Sign in, then choose Connect Claude Code to make a token and copy the command.", "Builder")
+    def open_page(fragment: str = "") -> None:
+        if window is None:
+            webbrowser.open(server.url + fragment)
+            return
+        if fragment:  # a query string makes the page reload, so it acts on the fragment
+            window.load_url(f"{server.url}?open={fragment.strip('#')}{fragment}")
+        window.show()
+        try:
+            window.restore()
+        except Exception:  # noqa: BLE001
+            pass
+
+    from . import api
+
+    api.DESKTOP["show"] = lambda: open_page()  # a second start of Builder.exe brings this window forward
 
     def copy_address(icon, item):
         copy_text(server.url.rstrip("/"))
         icon.notify(f"Copied {server.url.rstrip('/')}", "Builder")
 
-    def edit_settings(icon, item):
+    def edit_settings_file(icon, item):
         open_path(env_path())
         icon.notify("Change the settings, save, then choose Restart.", "Builder")
 
@@ -306,34 +263,43 @@ def run_tray(server: Server, argv: list[str]) -> None:
 
     def toggle_network(icon, item):
         set_env_value(env_path(), "BUILDER_HOST", "127.0.0.1" if network_on(item) else "0.0.0.0")
-        do_restart(icon, item)
+        finish(icon, restart=True)
 
-    def do_restart(icon, item):
-        restart["on"] = True
+    def finish(icon, restart=False):
+        state["restart"], state["quitting"] = restart, True
         icon.stop()
-
-    def quit_(icon, item):
-        icon.stop()
+        if window is not None:
+            window.destroy()
 
     menu = pystray.Menu(
-        pystray.MenuItem("Open Builder", open_builder, default=True),
-        pystray.MenuItem("Connect Claude Code…", connect),
+        pystray.MenuItem("Open Builder", lambda i, it: open_page(), default=True),
+        pystray.MenuItem("Connect apps && Claude…", lambda i, it: open_page("#connect")),
+        pystray.MenuItem("Settings…", lambda i, it: open_page("#settings")),
         pystray.MenuItem("Copy address", copy_address),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Settings (builder.env)", edit_settings),
+        pystray.MenuItem("Settings file (builder.env)", edit_settings_file),
         pystray.MenuItem("Open data folder", lambda i, it: open_path(data_dir())),
         pystray.MenuItem("Open log", lambda i, it: open_path(data_dir() / "logs" / "builder.log")),
         pystray.MenuItem("Start with Windows", toggle_autostart, checked=lambda it: autostart_enabled(),
                          visible=IS_WINDOWS),
-        pystray.MenuItem("Let other devices connect", toggle_network, checked=network_on),
+        pystray.MenuItem("Let other devices on my network connect", toggle_network, checked=network_on),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Restart", do_restart),
-        pystray.MenuItem("Quit Builder", quit_),
+        pystray.MenuItem("Restart", lambda i, it: finish(i, restart=True)),
+        pystray.MenuItem("Quit Builder", lambda i, it: finish(i)),
     )
     icon = pystray.Icon("Builder", icon_image(), f"Builder {__version__} · {server.url}", menu)
-    icon.run()
+    if window is not None:
+        import webview
+
+        icon.run_detached()  # the window's event loop owns the main thread
+        webview.start(private_mode=False, storage_path=str(data_dir() / "webview"))
+        if not state["quitting"]:
+            icon.stop()
+    else:
+        icon.run()
+    api.DESKTOP.pop("show", None)
     server.stop()
-    if restart["on"]:
+    if state["restart"]:
         relaunch([a for a in argv if a != "--first-run"] + ["--no-browser"])
 
 
@@ -371,6 +337,12 @@ def selftest() -> int:
         check(True, "Craft engine", craft.engine_version() or str(exe))
     except craft.EngineMissing:
         check(False, "Craft engine", f"{exe_name('craft-anything-cli')} not found")
+
+    if FROZEN and IS_WINDOWS:
+        from . import remote
+
+        check(remote.cloudflared_bin() is not None, "cloudflared (remote access)")
+        check(window_available(), "app window (pywebview)")
 
     from . import ops
 
@@ -454,10 +426,11 @@ def main(argv: list[str] | None = None) -> int:
     log_path = setup_logging()
     host = args.host or os.environ.get("BUILDER_HOST") or "127.0.0.1"
     port = args.port or int(os.environ.get("BUILDER_PORT") or 8000)
+    os.environ["BUILDER_PORT"] = str(port)  # remote access tunnels to this port
 
     if builder_at(port):
-        # Already running: just bring it up.
-        if not args.no_browser:
+        # Already running: bring its window forward (or open it in the browser).
+        if not args.no_browser and not _show_running(port):
             webbrowser.open(f"http://127.0.0.1:{port}/")
         return 0
     if not port_free(host, port):
@@ -474,10 +447,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     log.info("Builder %s is open at %s (data: %s)", __version__, server.url, data_dir())
     print(f"Builder is open at {server.url}", flush=True)
-    if not args.no_browser or first_run:
-        webbrowser.open(server.url)
+    show = not args.no_browser or first_run
 
     if args.headless:
+        if show:
+            webbrowser.open(server.url)
         try:
             while server.thread.is_alive():
                 server.thread.join(1)
@@ -488,14 +462,25 @@ def main(argv: list[str] | None = None) -> int:
         import pystray  # noqa: F401
     except Exception:  # noqa: BLE001  (no tray available: run like --headless)
         log.warning("no system tray available; running without an icon")
+        if show:
+            webbrowser.open(server.url)
         try:
             while server.thread.is_alive():
                 server.thread.join(1)
         except KeyboardInterrupt:
             server.stop()
         return 0
-    run_tray(server, argv)
+    run_desktop(server, argv, show)
     return 0
+
+
+def _show_running(port: int) -> bool:
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/_desktop/show", data=b"", method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=3) as r:
+            return r.status == 204
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _alert(msg: str) -> None:

@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from media_backend import config, winapp
+from media_backend import config, settings_file, winapp
 
 
 @pytest.fixture(autouse=True)
@@ -39,12 +39,12 @@ def test_real_environment_wins(tmp_path, monkeypatch):
 def test_set_env_value_keeps_comments(tmp_path):
     p = tmp_path / "builder.env"
     p.write_text("# keep me\n# ANTHROPIC_API_KEY=\nBUILDER_HOST=127.0.0.1\n")
-    winapp.set_env_value(p, "BUILDER_HOST", "0.0.0.0")
-    winapp.set_env_value(p, "ANTHROPIC_API_KEY", "sk-test")
-    winapp.set_env_value(p, "NEW_ONE", "x")
+    settings_file.set_env_value(p, "BUILDER_HOST", "0.0.0.0")
+    settings_file.set_env_value(p, "ANTHROPIC_API_KEY", "sk-test")
+    settings_file.set_env_value(p, "NEW_ONE", "x")
     text = p.read_text()
     assert "# keep me" in text
-    assert winapp.read_env_file(p) == {"ANTHROPIC_API_KEY": "sk-test", "BUILDER_HOST": "0.0.0.0", "NEW_ONE": "x"}
+    assert settings_file.read_env_file(p) == {"ANTHROPIC_API_KEY": "sk-test", "BUILDER_HOST": "0.0.0.0", "NEW_ONE": "x"}
 
 
 def test_platform_helpers(monkeypatch):
