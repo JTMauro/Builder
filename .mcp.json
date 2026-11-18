@@ -1,10 +1,10 @@
 {
   "mcpServers": {
-    "media": {
-      "command": "media-backend",
+    "builder": {
+      "command": "builder",
       "args": ["mcp"],
       "env": {
-        "MEDIA_BACKEND_DATA": "${HOME}/.media-backend"
+        "BUILDER_USER": "${BUILDER_USER:-claude-code}"
       }
     }
   }

@@ -830,7 +830,7 @@ $("#token-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const t = await api("/auth/tokens", { method: "POST", json: { name: $("#token-name").value.trim() || "Claude Code" } });
   $("#token-name").value = "";
-  $("#token-cmd").textContent = `claude mcp add --transport http builder ${location.origin}/mcp/ --header "Authorization: Bearer ${t.token}"`;
+  $("#token-cmd").textContent = `claude mcp add --transport http builder -s user ${location.origin}/mcp/ --header "Authorization: Bearer ${t.token}"`;
   $("#token-new").hidden = false;
   renderTokens();
 });

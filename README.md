@@ -15,7 +15,61 @@ own front end and its own audio/video workshop on top.**
   engine, so Craft's builder can use these tools while it builds.
 - **Rivet, accounts and Claude Code:** one assistant, one sign-in, and one connector for both parts.
 
-## Craft builds
+## Use Builder from anywhere
+
+Builder runs in one place, and everything else just connects to it. Nothing else needs to install
+or set it up.
+
+**1. Run it (once, on the computer or server that hosts it)**
+
+```bash
+pip install -e .              # from this repository
+builder setup                 # builds the Craft engine into ~/.builder/bin and checks ffmpeg
+export ANTHROPIC_API_KEY=...  # for Rivet and Craft builds
+builder serve                 # http://127.0.0.1:8000/  (add --host 0.0.0.0 to let other devices in)
+```
+
+Everything lives in `~/.builder`: accounts, files, Craft projects and the engine. The web app, other
+apps and Claude Code all share it. `builder doctor` shows what's ready.
+
+**2. Use it in the browser:** open the address above, make your account, and use the **Craft** and
+**Audio & video** tabs.
+
+**3. Use it from other apps:** every feature is an HTTP API (docs at `/docs`). Authenticate with a
+personal token: *your name → Connect Claude Code* in the web app, or `builder token --user NAME`.
+
+```bash
+curl -H "Authorization: Bearer mbp_..." http://127.0.0.1:8000/craft/projects
+```
+
+```python
+from media_backend.client import Builder        # one stdlib-only file; copy it anywhere
+b = Builder("http://127.0.0.1:8000", token="mbp_...")
+run = b.build("A landing page for my bakery", target="https://example.com")
+for event in b.follow(run["id"]):
+    print(event)
+```
+
+A web app on another site calling Builder from the browser needs its address in
+`MEDIA_BACKEND_CORS_ORIGINS` (comma-separated). It uses a token; sign-in cookies are never shared.
+
+**4. Use it from another Claude Code chat:** connect the chat to the running Builder. In the web
+app, *Connect Claude Code* gives you this command, ready to paste. `-s user` makes it available in
+every project:
+
+```bash
+claude mcp add --transport http builder -s user http://127.0.0.1:8000/mcp/ --header "Authorization: Bearer mbp_..."
+```
+
+That chat then has all of Builder's tools (`craft_build_start`, `craft_build_status`, `trim`,
+`animate_image`, `ask_assistant`, …). Its builds and Rivet chats are yours, in your account.
+
+- On the same computer you can instead let Claude Code start Builder itself, with no server and no
+  token: `claude mcp add builder -s user -e BUILDER_USER=<your username> -- builder mcp`.
+- A Claude Code chat in the cloud (claude.ai/code) can only reach a Builder that's on the internet:
+  run `builder serve` on a server behind HTTPS and use that address in the command above. A Builder
+  on your own computer is reachable only from that computer and your local network.
+
 
 1. Build the engine once (see [`engine/BUILDER.md`](engine/BUILDER.md)):
    `cd engine && cargo build --release -p craft-anything-cli`
@@ -67,7 +121,7 @@ setup on one machine:
 
 ```bash
 pip install "git+https://github.com/JTMauro/builder.git"
-claude mcp add builder -- media-backend mcp
+claude mcp add builder -- builder mcp
 ```
 
 ## Operations
@@ -101,7 +155,7 @@ Needs Python 3.10+ and ffmpeg/ffprobe on `PATH`.
 ```bash
 pip install -e .            # add [dev] for pytest
 export ANTHROPIC_API_KEY=... # only needed for the assistant
-media-backend serve --host 127.0.0.1 --port 8000
+builder serve --host 127.0.0.1 --port 8000
 ```
 
 Open `http://127.0.0.1:8000/` for the **Builder** web app. API docs are at `http://127.0.0.1:8000/docs`.
@@ -144,12 +198,12 @@ subscriptions, so the assistant runs on the server's API key.
 from, and exported to, the project directory.
 
 ```bash
-claude mcp add media -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -- media-backend mcp
+claude mcp add builder -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -- builder mcp
 ```
 
 Or commit the included `.mcp.json` to a project, and everyone who opens it in Claude Code gets the connector.
 
-**Remote server (HTTP):** run `media-backend serve --host 0.0.0.0` (behind HTTPS), sign in, and use
+**Remote server (HTTP):** run `builder serve --host 0.0.0.0` (behind HTTPS), sign in, and use
 *your name → Connect Claude Code*. It gives you a command like this one:
 
 ```bash
@@ -198,13 +252,16 @@ curl -s -X POST localhost:8000/assistant/chat -H 'content-type: application/json
   -d "{\"message\":\"Make a 3 second GIF of the best moment\",\"file_ids\":[\"$ID\"]}"
 ```
 
-You can also talk to the assistant in a terminal with `media-backend chat`.
+You can also talk to the assistant in a terminal with `builder chat`.
 
 ## Configuration (environment variables)
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MEDIA_BACKEND_DATA` | `./media-data` | Where files are stored |
+| `MEDIA_BACKEND_DATA` | `~/.builder` | Builder's home: files, accounts, chats, Craft projects, the engine (`bin/`) |
+| `BUILDER_USER` | `claude-code` | Whose account `builder mcp` (stdio) works in |
+| `MEDIA_BACKEND_CORS_ORIGINS` | *(none)* | Other sites' web apps allowed to call the API from a browser |
+| `CRAFT_ENGINE_BIN` | *(found)* | A specific craft-anything-cli program; otherwise `~/.builder/bin`, then `engine/target` |
 | `MEDIA_BACKEND_AUTH` | `on` | Sign-in required for the app, API and `/mcp`. `off` opens everything (only on a machine nobody else can reach) |
 | `MEDIA_BACKEND_OPEN_SIGNUP` | `off` | Let anyone create an account from the sign-in screen |
 | `MEDIA_BACKEND_TOKEN` | *(none)* | Optional shared service token for scripts (`Authorization: Bearer <token>`); people should use personal tokens instead |

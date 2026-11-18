@@ -23,7 +23,8 @@ from .mcp_server import build_server
 from .users import AuthError, User, get_store
 
 COOKIE = "builder_session"
-PUBLIC_PATHS = {"/", "/health", "/favicon.ico", "/auth/status", "/auth/login", "/auth/setup", "/auth/signup"}
+PUBLIC_PATHS = {"/", "/health", "/favicon.ico", "/auth/status", "/auth/login", "/auth/setup", "/auth/signup",
+                "/docs", "/openapi.json"}
 # Stand-in identities when a request isn't from a signed-in person.
 LOCAL_USER = User(id=0, username="local", display_name="Local", is_admin=True, created_at=0)
 SERVICE_USER = User(id=-1, username="service", display_name="Service token", is_admin=False, created_at=0)
@@ -90,7 +91,14 @@ def create_app() -> FastAPI:
         async with mcp.session_manager.run():
             yield
 
-    app = FastAPI(title="Media Backend", version=__version__, lifespan=lifespan)
+    app = FastAPI(
+        title="Builder API", version=__version__, lifespan=lifespan,
+        description=(
+            "Craft builds on the Craft Anything engine, an audio/video workshop and Rivet. Authenticate with "
+            "`Authorization: Bearer mbp_…` (a personal token from the web app's *Connect Claude Code*, or "
+            "`builder token --user NAME`)."
+        ),
+    )
 
     def identify(request: Request) -> tuple[User | None, str]:
         """Return (user, how) for a request: signed-in cookie, personal token, or server token."""
@@ -116,6 +124,8 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def auth(request: Request, call_next):
         path = request.url.path
+        if request.method == "OPTIONS" and get_settings().cors_origins:
+            return await call_next(request)  # CORS preflight carries no credentials
         if path in PUBLIC_PATHS or path.startswith("/static/"):
             return await call_next(request)
         user, how = identify(request)
@@ -447,5 +457,17 @@ def create_app() -> FastAPI:
         return FileResponse(static_dir / "index.html", headers={"Cache-Control": "no-cache"})
 
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    if settings.cors_origins:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        # Added last, so it wraps everything (also the sign-in check's 401s get CORS headers).
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(settings.cors_origins),
+            allow_credentials=False,  # other sites use tokens, never the sign-in cookie
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "Mcp-Session-Id", "Mcp-Protocol-Version"],
+            expose_headers=["Mcp-Session-Id"],
+        )
     app.mount("/mcp", mcp_app)
     return app

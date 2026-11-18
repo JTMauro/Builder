@@ -30,14 +30,15 @@ ENGINE_DIR = Path(__file__).resolve().parent.parent / "engine"
 class EngineMissing(RuntimeError):
     def __init__(self):
         super().__init__(
-            "The Craft engine isn't built yet. Run `cargo build --release -p craft-anything-cli` in the "
-            "engine/ folder, or set CRAFT_ENGINE_BIN to a craft-anything-cli program."
+            "The Craft engine isn't built yet. Run `builder setup` (it builds engine/ and installs it in "
+            "~/.builder/bin), or set CRAFT_ENGINE_BIN to a craft-anything-cli program."
         )
 
 
 def engine_bin() -> Path:
     env = os.environ.get("CRAFT_ENGINE_BIN")
     candidates = [Path(env)] if env else []
+    candidates.append(get_settings().bin_dir / "craft-anything-cli")  # where `builder setup` installs it
     target = os.environ.get("CARGO_TARGET_DIR")
     for base in ([Path(target)] if target else []) + [ENGINE_DIR / "target"]:
         candidates += [base / "release" / "craft-anything-cli", base / "debug" / "craft-anything-cli"]

@@ -14,7 +14,9 @@ def _env(name: str, default: str) -> str:
 
 @dataclass(frozen=True)
 class Settings:
-    data_dir: Path = field(default_factory=lambda: Path(_env("MEDIA_BACKEND_DATA", "./media-data")).resolve())
+    # One home per computer, shared by the web app, other apps and every Claude Code chat:
+    # files, accounts, chats, Craft projects and the engine program (bin/).
+    data_dir: Path = field(default_factory=lambda: Path(_env("MEDIA_BACKEND_DATA", str(Path.home() / ".builder"))).expanduser().resolve())
     # Optional bearer token. When set, every HTTP route (including /mcp) requires it.
     api_token: str = field(default_factory=lambda: _env("MEDIA_BACKEND_TOKEN", ""))
     # Directories the MCP `import_path` / `export_file` tools may read from or write to.
@@ -30,6 +32,11 @@ class Settings:
     auth_enabled: bool = field(default_factory=lambda: _env("MEDIA_BACKEND_AUTH", "on").lower() not in ("off", "0", "false", "no"))
     # Let anyone create an account from the sign-in screen (otherwise an admin adds people).
     open_signup: bool = field(default_factory=lambda: _env("MEDIA_BACKEND_OPEN_SIGNUP", "off").lower() in ("on", "1", "true", "yes"))
+    # Web apps on other sites that may call the API from a browser (comma-separated origins, or "*").
+    # They authenticate with a personal token; the sign-in cookie is never sent cross-site.
+    cors_origins: tuple[str, ...] = field(
+        default_factory=lambda: tuple(o.strip() for o in _env("MEDIA_BACKEND_CORS_ORIGINS", "").split(",") if o.strip())
+    )
     max_upload_mb: int = field(default_factory=lambda: int(_env("MEDIA_BACKEND_MAX_UPLOAD_MB", "2048")))
     workers: int = field(default_factory=lambda: int(_env("MEDIA_BACKEND_WORKERS", "2")))
     ffmpeg: str = field(default_factory=lambda: _env("FFMPEG_BIN", "ffmpeg"))
@@ -49,6 +56,10 @@ class Settings:
     @property
     def files_dir(self) -> Path:
         return self.data_dir / "files"
+
+    @property
+    def bin_dir(self) -> Path:
+        return self.data_dir / "bin"
 
 
 _settings: Settings | None = None

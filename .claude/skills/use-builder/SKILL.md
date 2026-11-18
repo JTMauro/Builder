@@ -24,12 +24,12 @@ that project. Claude Code starts Builder itself, and files move in and out of th
 
 ```bash
 pip install "git+https://github.com/JTMauro/builder.git"   # private repo: needs GitHub access
-claude mcp add builder -- media-backend mcp
+claude mcp add builder -s user -e BUILDER_USER=<your username> -- builder mcp
 ```
 
 Add `-e ANTHROPIC_API_KEY=...` only if you want `ask_assistant` (Rivet). The media tools work without it.
 
-**B. A shared Builder server.** Someone runs `media-backend serve --host 0.0.0.0` behind HTTPS. Each
+**B. A shared Builder server.** Someone runs `builder serve --host 0.0.0.0` behind HTTPS. Each
 person signs in to the web app, opens *their name → Connect Claude Code*, and runs the command it shows:
 
 ```bash

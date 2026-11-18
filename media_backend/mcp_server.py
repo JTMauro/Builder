@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx2
-from mcp.server.mcpserver import Image, MCPServer
+from mcp.server.mcpserver import Context, Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel, ValidationError
 
@@ -83,6 +83,36 @@ class _Server(MCPServer):
 
     def add_tool(self, fn, *args, **kwargs):
         return super().add_tool(_friendly(fn), *args, **kwargs)
+
+
+def caller(ctx: Context | None) -> str:
+    """Whose builds and chats a connector call works on.
+
+    Over HTTP: the person whose personal token (`mbp_…`) sent it, so builds started from another app
+    or a remote Claude Code show up in that person's account. Over stdio (Claude Code on this
+    computer): BUILDER_USER, or "claude-code" when it isn't set.
+    """
+    import os
+
+    from .config import get_settings
+    from .users import get_store
+
+    headers = None
+    if ctx is not None:
+        try:
+            headers = ctx.headers
+        except Exception:  # noqa: BLE001 - no request (stdio, tests)
+            headers = None
+    if headers:
+        auth = next((v for k, v in headers.items() if k.lower() == "authorization"), "")
+        token = auth.removeprefix("Bearer ").strip()
+        user = get_store().user_for_api_token(token) if token else None
+        if user:
+            return user.username
+        if not get_settings().auth_enabled:
+            return os.environ.get("BUILDER_USER", "local")
+        return "service"
+    return os.environ.get("BUILDER_USER", "claude-code")
 
 
 def build_server(media_only: bool | None = None) -> MCPServer:
@@ -202,65 +232,65 @@ def build_server(media_only: bool | None = None) -> MCPServer:
 
     from . import craft_tools
 
-    def _craft(name: str, args: dict[str, Any]) -> Any:
+    def _craft(name: str, args: dict[str, Any], ctx: Context | None = None) -> Any:
         from . import craft
 
         try:
-            return craft_tools.call(name, {k: v for k, v in args.items() if v is not None}, "claude-code")
+            return craft_tools.call(name, {k: v for k, v in args.items() if v is not None}, caller(ctx))
         except craft.RunNotFound as e:
             raise ToolError(f"No build {e}") from e
         except craft.EngineMissing as e:
             raise ToolError(str(e)) from e
 
     @mcp.tool()
-    def craft_projects_list() -> Any:
+    def craft_projects_list(ctx: Context | None = None) -> Any:
         """List Craft projects made through this connector, newest first."""
-        return _craft("craft_projects_list", {})
+        return _craft("craft_projects_list", {}, ctx)
 
     @mcp.tool()
-    def craft_build_start(request: str, target: str = "", file_id: str | None = None, rounds: int = 2) -> Any:
+    def craft_build_start(request: str, target: str = "", file_id: str | None = None, rounds: int = 2, ctx: Context | None = None) -> Any:
         """Start a Craft build: study a target (web address, uploaded file id, or nothing), build your own
         version with a coding agent, check it against the original and refine. Follow it with craft_build_status."""
-        return _craft("craft_build_start", {"request": request, "target": target, "file_id": file_id, "rounds": rounds})
+        return _craft("craft_build_start", {"request": request, "target": target, "file_id": file_id, "rounds": rounds}, ctx)
 
     @mcp.tool()
-    def craft_build_followup(request: str, run_id: str | None = None, project_path: str | None = None) -> Any:
+    def craft_build_followup(request: str, run_id: str | None = None, project_path: str | None = None, ctx: Context | None = None) -> Any:
         """Ask for a change to an existing Craft project (by run id or project path)."""
-        return _craft("craft_build_followup", {"request": request, "run_id": run_id, "project_path": project_path})
+        return _craft("craft_build_followup", {"request": request, "run_id": run_id, "project_path": project_path}, ctx)
 
     @mcp.tool()
-    def craft_build_status(run_id: str) -> Any:
+    def craft_build_status(run_id: str, ctx: Context | None = None) -> Any:
         """A build's step, status, checks (how alike), preview, anything waiting, and recent activity."""
-        return _craft("craft_build_status", {"run_id": run_id})
+        return _craft("craft_build_status", {"run_id": run_id}, ctx)
 
     @mcp.tool()
-    def craft_build_answer(run_id: str, choice: str | None = None, text: str | None = None) -> Any:
+    def craft_build_answer(run_id: str, choice: str | None = None, text: str | None = None, ctx: Context | None = None) -> Any:
         """Answer a question the builder asked. Approvals of actions are left to the person (Builder's build screen)."""
-        return _craft("craft_build_answer", {"run_id": run_id, "choice": choice, "text": text})
+        return _craft("craft_build_answer", {"run_id": run_id, "choice": choice, "text": text}, ctx)
 
     @mcp.tool()
-    def craft_build_stop(run_id: str) -> Any:
+    def craft_build_stop(run_id: str, ctx: Context | None = None) -> Any:
         """Stop a running build."""
-        return _craft("craft_build_stop", {"run_id": run_id})
+        return _craft("craft_build_stop", {"run_id": run_id}, ctx)
 
     @mcp.tool()
-    def craft_engine_tools_search(query: str) -> Any:
+    def craft_engine_tools_search(query: str, ctx: Context | None = None) -> Any:
         """Search the Craft engine's analysis tools by words."""
-        return _craft("craft_engine_tools_search", {"query": query})
+        return _craft("craft_engine_tools_search", {"query": query}, ctx)
 
     @mcp.tool()
-    def craft_engine_tool(tool: str, params: dict[str, Any] | None = None) -> Any:
+    def craft_engine_tool(tool: str, params: dict[str, Any] | None = None, ctx: Context | None = None) -> Any:
         """Run one Craft engine tool by id with JSON params (tools that run foreign code are refused)."""
-        return _craft("craft_engine_tool", {"tool": tool, "params": params or {}})
+        return _craft("craft_engine_tool", {"tool": tool, "params": params or {}}, ctx)
 
     # ---------------------------------------------------------------- assistant
 
     @mcp.tool()
-    def ask_assistant(message: str, session_id: str | None = None, file_ids: list[str] | None = None) -> dict[str, Any]:
+    def ask_assistant(message: str, session_id: str | None = None, file_ids: list[str] | None = None, ctx: Context | None = None) -> dict[str, Any]:
         """Hand a media task to the built-in Claude assistant, which plans and runs the operations itself and
         checks its own results. Pass the returned session_id to continue the same conversation."""
         start = time.time()
-        res = get_assistant().chat(message, session_id=session_id, file_ids=file_ids, owner="claude-code")
+        res = get_assistant().chat(message, session_id=session_id, file_ids=file_ids, owner=caller(ctx))
         return {
             "session_id": res.session_id,
             "reply": res.reply,
