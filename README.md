@@ -1,4 +1,49 @@
-# Media Backend
+# Builder
+
+![A Craft build in Builder](docs/craft.png)
+
+**Builder runs on the [Craft Anything](https://github.com/storytold/craft-anything) engine, with its
+own front end and its own audio/video workshop on top.**
+
+- **Craft builds (the foundation):** point Builder at a website, app or game (or start from
+  nothing) and say what you want. The engine studies the original, a coding agent builds your own
+  version in a project folder, and the result is checked against the original (how alike, in
+  percent) and refined. You see each step live and approve anything that runs outside the project.
+  The engine is a copy of Craft Anything in [`engine/`](engine/BUILDER.md) that you can extend.
+- **The audio & video workshop (yours):** 18 local ffmpeg tools (trim, captions, soundtracks,
+  joining clips, GIFs, frame-by-frame and still-image animation). It is also plugged into the
+  engine, so Craft's builder can use these tools while it builds.
+- **Rivet, accounts and Claude Code:** one assistant, one sign-in, and one connector for both parts.
+
+## Craft builds
+
+1. Build the engine once (see [`engine/BUILDER.md`](engine/BUILDER.md)):
+   `cd engine && cargo build --release -p craft-anything-cli`
+2. Set `ANTHROPIC_API_KEY` for the server. Builder gives it to the engine as its builder AI the
+   first time a build starts (in Builder's own engine settings, `MEDIA_BACKEND_DATA/engine-config`).
+   Without a key, the engine uses a coding-agent app it finds on the computer, such as Claude Code.
+3. Open the **Craft** tab, say what to make, optionally give a web address or a file from the
+   library, and press **Start building**.
+
+Each person's builds and projects are private to them (`MEDIA_BACKEND_DATA/projects/<username>/`).
+Approvals ("Run `npm install`?") are always the person's: Rivet and Claude Code can start and
+follow builds and answer the builder's questions, but can't approve actions.
+
+| Method & path | Purpose |
+|---|---|
+| `GET /craft/status` | Is the engine built, and which version |
+| `POST /craft/runs` `{request, target?, file_id?, rounds?}` | Start a build |
+| `GET /craft/runs`, `GET /craft/runs/{id}?after=N&wait=S` | Your builds; a build's events (long-poll) |
+| `POST /craft/runs/{id}/answer` `{choice?, text?, allow?, always?}` | Answer a question or approval |
+| `POST /craft/runs/{id}/stop`, `POST /craft/runs/{id}/followup` `{request}` | Stop; ask for a change |
+| `GET /craft/projects`, `GET /craft/projects/file?path=` | Your projects; a project's file (e.g. a check screenshot) |
+
+Rivet's and the connector's Craft tools: `craft_build_start`, `craft_build_status`,
+`craft_build_answer`, `craft_build_followup`, `craft_build_stop`, `craft_projects_list`,
+`craft_engine_tools_search` and `craft_engine_tool` (the engine's ~330 analysis tools; ones that
+run foreign code are refused).
+
+# The audio & video workshop
 
 ![Builder web app](docs/screenshot.png)
 

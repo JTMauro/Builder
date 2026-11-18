@@ -36,9 +36,11 @@ else:
     project = Path(args[args.index("--projects-dir") + 1]) / "made-by-test"
 project.mkdir(parents=True, exist_ok=True)
 (project / "checks").mkdir(exist_ok=True)
-(project / "checks" / "shot.png").write_bytes(b"\x89PNG fake")
+import base64
+(project / "checks" / "shot.png").write_bytes(base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="))
 emit({"type": "project", "path": str(project)})
-emit({"type": "step", "step": "inspecting", "text": f"Studying {target}"})
+emit({"type": "step", "step": "study", "text": f"Studying {target}"})
 emit({"type": "text", "text": "Looking at "})
 emit({"type": "text", "text": "the page.\n"})
 print("a log line", file=sys.stderr, flush=True)

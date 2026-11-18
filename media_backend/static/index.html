@@ -100,7 +100,7 @@
         <div id="mascot-slot"></div>
         <div>
           <h1 class="title">Builder</h1>
-          <p class="tagline">Audio &amp; video workshop</p>
+          <p class="tagline">Craft anything, build your own</p>
         </div>
       </div>
       <div class="top-actions">
@@ -119,9 +119,58 @@
       </div>
     </header>
 
+    <nav class="tabs" role="tablist" aria-label="Builder areas">
+      <button type="button" role="tab" class="tab" id="tab-craft" data-view="craft" aria-selected="true">🏗️ Craft</button>
+      <button type="button" role="tab" class="tab" id="tab-media" data-view="media" aria-selected="false">🎬 Audio &amp; video</button>
+    </nav>
+
     <main class="layout">
+      <!-- Craft: study → build → check, run by the Craft Anything engine -->
+      <section class="panel craft-side view-craft" aria-labelledby="craft-new-h">
+        <div class="panel-head"><h2 id="craft-new-h">New build</h2><span id="engine-state" class="muted small-text"></span></div>
+        <form id="build-form" class="build-form">
+          <label class="field wide"><span>What do you want to make?</span>
+            <textarea id="build-request" rows="3" required placeholder="e.g. A landing page for my bakery, in the style of this site"></textarea></label>
+          <label class="field wide"><span>Study this web address (optional)</span>
+            <input id="build-target" type="url" placeholder="https://… or leave empty to start fresh"></label>
+          <label class="field wide"><span>…or study a file from the audio &amp; video library (optional)</span>
+            <select id="build-file"><option value="">No file</option></select></label>
+          <label class="field"><span>Refinement rounds</span><input id="build-rounds" type="number" min="0" max="10" value="2"></label>
+          <div class="form-actions"><button class="btn primary" type="submit" id="build-start">Start building</button><span id="build-form-status" class="form-error"></span></div>
+        </form>
+        <h3 class="section-label">Your builds</h3>
+        <div id="build-list" class="rows"><div class="muted small-text">Nothing built yet.</div></div>
+      </section>
+
+      <section class="panel build view-craft" aria-labelledby="build-h">
+        <div class="panel-head">
+          <h2 id="build-h">Build</h2>
+          <div class="head-actions"><span id="build-status" class="pill">Idle</span><button type="button" id="build-stop" class="btn ghost small" hidden>Stop</button></div>
+        </div>
+        <div id="build-empty" class="build-empty">
+          <p><strong>Start a build on the left.</strong> Craft studies the original, a coding agent builds your own version, then
+          it's checked against the original and refined. You approve anything that runs outside the project.</p>
+        </div>
+        <div id="build-view" hidden>
+          <p id="build-title" class="build-title"></p>
+          <ol class="pipeline" id="pipeline">
+            <li data-step="study">Study</li><li data-step="build">Build</li><li data-step="check">Check</li><li data-step="done">Ready</li>
+          </ol>
+          <div id="ask-card" class="ask-card" hidden></div>
+          <div id="build-result" class="build-result" hidden></div>
+          <h3 class="section-label">Checks</h3>
+          <div id="checks" class="checks"><div class="muted small-text">No checks yet.</div></div>
+          <h3 class="section-label">Activity</h3>
+          <div id="feed" class="feed" aria-live="polite"></div>
+          <form id="followup-form" class="inline-form followup" hidden>
+            <input id="followup-input" placeholder="Ask for a change, e.g. make the header blue">
+            <button class="btn primary small" type="submit">Send change</button>
+          </form>
+        </div>
+      </section>
+
       <!-- Library -->
-      <section class="panel library" aria-labelledby="lib-h">
+      <section class="panel library view-media" aria-labelledby="lib-h" hidden>
         <div class="panel-head">
           <h2 id="lib-h">Library</h2>
           <span id="file-count" class="muted"></span>
@@ -136,7 +185,7 @@
       </section>
 
       <!-- Workbench -->
-      <section class="panel bench" aria-labelledby="bench-h">
+      <section class="panel bench view-media" aria-labelledby="bench-h" hidden>
         <div class="panel-head">
           <h2 id="bench-h">Workbench</h2>
           <span id="selected-label" class="muted">Pick a file from the library</span>

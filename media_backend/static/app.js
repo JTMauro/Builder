@@ -336,7 +336,7 @@ function addMsg(who, text, extra = []) {
 }
 function greet() {
   log.replaceChildren();
-  addMsg("bot", `Hi! I'm ${$("#bot-name").textContent}. Tell me what you want to make: trim a clip, add music, caption it, or animate your drawings. I'll build it and check the result.`);
+  addMsg("bot", `Hi! I'm ${$("#bot-name").textContent}. Tell me what you want to make. I can start a Craft build from a website, app or game (or from scratch) and keep an eye on it, or work on audio and video: trim, add music, caption, or animate your drawings.`);
 }
 $("#chat-reset").addEventListener("click", () => {
   state.session = null;
@@ -499,6 +499,248 @@ mascot.addEventListener("click", () => {
   $("#chat-input").focus();
 });
 
+/* ================================================================ craft builds */
+const craftState = { runs: [], projects: [], current: null, cursor: 0, polling: null, engine: null };
+
+function showView(view) {
+  document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.view === view)));
+  document.querySelectorAll(".view-craft").forEach((el) => { el.hidden = view !== "craft"; });
+  document.querySelectorAll(".view-media").forEach((el) => { el.hidden = view !== "media"; });
+  store.set("mb_view", view);
+}
+document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showView(t.dataset.view)));
+
+const STEP_ORDER = ["study", "build", "check", "done"];
+const STATUS_WORDS = { starting: "Starting", running: "Working", waiting: "Needs you", done: "Ready", failed: "Stopped with a problem", stopped: "Stopped" };
+
+async function loadCraft() {
+  try {
+    craftState.engine = await api("/craft/status");
+    $("#engine-state").textContent = craftState.engine.engine ? (craftState.engine.version || "Engine ready") : "Engine not built";
+    $("#engine-state").title = craftState.engine.message || "";
+  } catch { /* status is informational */ }
+  await refreshBuildList();
+  const sel = $("#build-file");
+  const keep = sel.value;
+  sel.replaceChildren(h("option", { value: "", text: "No file" }), ...state.files.map((f) => h("option", { value: f.id, text: f.name })));
+  sel.value = keep;
+}
+
+async function refreshBuildList() {
+  try {
+    [craftState.runs, craftState.projects] = await Promise.all([api("/craft/runs"), api("/craft/projects")]);
+  } catch { return; }
+  const list = $("#build-list");
+  const rows = [];
+  const runProjects = new Set();
+  for (const r of craftState.runs) {
+    if (r.project) runProjects.add(r.project);
+    rows.push(h("button", { type: "button", class: `row build-item${craftState.current === r.id ? " selected" : ""}`, onclick: () => openRun(r.id) },
+      h("span", { class: `status-dot ${r.status}` }),
+      h("div", { class: "grow" }, h("strong", { text: r.request.slice(0, 70) }), h("small", { text: `${STATUS_WORDS[r.status] || r.status}${r.target && r.target !== "-" ? " · " + r.target : ""}` }))));
+  }
+  for (const p of craftState.projects) {
+    if (runProjects.has(p.path)) continue;
+    const sim = p.last_check && p.last_check.similarity != null ? ` · ${Math.round(p.last_check.similarity)}% alike` : "";
+    rows.push(h("button", { type: "button", class: "row build-item", onclick: () => openProject(p) },
+      h("span", { class: "status-dot done" }),
+      h("div", { class: "grow" }, h("strong", { text: p.name }), h("small", { text: `${p.stack || "Project"}${sim}` }))));
+  }
+  list.replaceChildren(...(rows.length ? rows : [h("div", { class: "muted small-text", text: "Nothing built yet." })]));
+}
+
+$("#build-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const st = $("#build-form-status"), btn = $("#build-start");
+  const body = { request: $("#build-request").value.trim(), target: $("#build-target").value.trim(), file_id: $("#build-file").value || null, rounds: Number($("#build-rounds").value || 2) };
+  if (!body.request) { st.textContent = "Say what you want to make."; return; }
+  btn.disabled = true; st.textContent = "";
+  try {
+    const run = await api("/craft/runs", { method: "POST", json: body });
+    $("#build-request").value = "";
+    await refreshBuildList();
+    openRun(run.id);
+  } catch (err) { st.textContent = err.message; } finally { btn.disabled = false; }
+});
+
+function resetBuildView() {
+  $("#build-empty").hidden = true;
+  $("#build-view").hidden = false;
+  $("#feed").replaceChildren();
+  $("#checks").replaceChildren(h("div", { class: "muted small-text", text: "No checks yet." }));
+  $("#ask-card").hidden = true;
+  $("#build-result").hidden = true;
+}
+
+function openRun(id) {
+  if (craftState.polling) craftState.polling.cancelled = true;
+  craftState.current = id;
+  craftState.cursor = 0;
+  craftState.project = null;
+  resetBuildView();
+  refreshBuildList();
+  const token = { cancelled: false };
+  craftState.polling = token;
+  pollRun(id, token);
+}
+
+function openProject(p) {
+  if (craftState.polling) craftState.polling.cancelled = true;
+  craftState.current = null;
+  craftState.project = p;
+  resetBuildView();
+  $("#build-title").textContent = `${p.name}: ${p.request}`;
+  setPipeline("done", true);
+  setStatusPill("done");
+  $("#build-stop").hidden = true;
+  if (p.last_check) renderChecks([p.last_check], p.path);
+  feedLine("f-note", p.last_reply || p.note || "Saved project.");
+  $("#followup-form").hidden = false;
+}
+
+async function pollRun(id, token) {
+  let busy = false, lastStatus = null;
+  while (!token.cancelled) {
+    let r;
+    try { r = await api(`/craft/runs/${id}?after=${craftState.cursor}&wait=25`); }
+    catch (err) { feedLine("f-err", err.message); await sleep(3000); continue; }
+    if (token.cancelled) break;
+    craftState.cursor = r.cursor;
+    for (const ev of r.events) renderEvent(ev);
+    renderRun(r.run);
+    if (r.run.status !== lastStatus) { lastStatus = r.run.status; refreshBuildList(); }
+    const running = !r.run.finished_at;
+    if (running && !busy) { setBusy(1); busy = true; }
+    if (!running) { if (busy) setBusy(-1); busy = false; refreshBuildList(); break; }
+  }
+  if (busy) setBusy(-1);
+}
+
+function setStatusPill(status) {
+  const pill = $("#build-status");
+  pill.textContent = STATUS_WORDS[status] || status;
+  pill.className = "pill " + ({ done: "ok", failed: "bad", stopped: "bad", waiting: "wait" }[status] || "run");
+}
+
+function setPipeline(step, finishedOk) {
+  const at = finishedOk ? 4 : Math.max(0, STEP_ORDER.indexOf(step));
+  document.querySelectorAll("#pipeline li").forEach((li, i) => {
+    li.classList.toggle("done", i < at || (finishedOk && i === 3));
+    li.classList.toggle("now", !finishedOk && i === at);
+  });
+}
+
+function renderRun(run) {
+  $("#build-title").textContent = run.target && run.target !== "-" ? `${run.request}  ·  from ${run.target}` : run.request;
+  setStatusPill(run.status);
+  setPipeline(run.step || "study", run.status === "done");
+  $("#build-stop").hidden = !!run.finished_at;
+  renderAsk(run);
+  if (run.checks.length) renderChecks(run.checks, run.project);
+  const res = $("#build-result");
+  if (run.finished_at) {
+    res.hidden = false;
+    res.className = `build-result ${run.status === "done" ? "ok" : "bad"}`;
+    res.replaceChildren(run.status === "done" ? "Ready. " : "", run.message || STATUS_WORDS[run.status] || "");
+    if (run.preview) res.append(" ", h("a", { href: run.preview, target: "_blank", rel: "noopener", text: "Open preview" }));
+    $("#followup-form").hidden = !run.project;
+  } else {
+    $("#followup-form").hidden = true;
+    if (run.preview) { res.hidden = false; res.className = "build-result"; res.replaceChildren("Preview is up: ", h("a", { href: run.preview, target: "_blank", rel: "noopener", text: run.preview })); }
+  }
+}
+
+function renderAsk(run) {
+  const card = $("#ask-card");
+  const p = run.pending;
+  if (!p) { card.hidden = true; card.dataset.id = ""; return; }
+  if (card.dataset.id === p.id && !card.hidden) return;
+  card.dataset.id = p.id;
+  card.hidden = false;
+  const send = async (answer) => {
+    card.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+    try { await api(`/craft/runs/${run.id}/answer`, { method: "POST", json: answer }); card.hidden = true; }
+    catch (err) { feedLine("f-err", err.message); card.querySelectorAll("button").forEach((b) => { b.disabled = false; }); }
+  };
+  const kids = [h("h4", { text: p.kind === "approval" ? `Allow this? ${p.title}` : p.title })];
+  if (p.detail) kids.push(h("pre", { text: p.detail }));
+  const actions = h("div", { class: "ask-actions" });
+  if (p.kind === "approval") {
+    actions.append(
+      h("button", { type: "button", class: "btn primary small", text: "Allow once", onclick: () => send({ allow: true }) }),
+      h("button", { type: "button", class: "btn ghost small", text: "Always for this project", onclick: () => send({ allow: true, always: true }) }),
+      h("button", { type: "button", class: "btn ghost small", text: "Refuse", onclick: () => send({ allow: false }) }));
+  } else {
+    for (const c of p.choices || []) actions.append(h("button", { type: "button", class: "btn ghost small", text: c, onclick: () => send({ choice: c }) }));
+    const input = h("input", { placeholder: p.choices && p.choices.length ? "Or type your own answer" : "Your answer" });
+    actions.append(input, h("button", { type: "button", class: "btn primary small", text: "Answer", onclick: () => send({ text: input.value.trim() || "No preference; use your best judgement." }) }));
+  }
+  kids.push(actions);
+  card.replaceChildren(...kids);
+}
+
+function projectFileUrl(project, rel) { return `/craft/projects/file?path=${encodeURIComponent(project + "/" + rel)}`; }
+
+function renderChecks(checks, project) {
+  $("#checks").replaceChildren(...checks.map((c) => {
+    const sim = c.similarity != null ? Math.round(c.similarity) : null;
+    const shots = (c.artifacts || []).filter((a) => /\.(png|jpe?g|webp)$/i.test(a)).slice(0, 4);
+    return h("div", { class: "check" },
+      h("div", { class: "check-top" }, h("span", { text: `Check ${c.round} · ${c.passed ? "works" : "doesn't work yet"}` }), h("span", { text: sim != null ? `${sim}% alike` : "not compared" })),
+      sim != null ? h("div", { class: "bar" }, h("span", { style: `width:${Math.max(2, Math.min(100, sim))}%` })) : null,
+      c.note ? h("p", { text: c.note }) : null,
+      shots.length && project ? h("div", { class: "shots" }, ...shots.map((a) => h("img", { src: projectFileUrl(project, a), alt: `Screenshot from check ${c.round}`, loading: "lazy", onclick: (e) => window.open(e.target.src, "_blank") }))) : null);
+  }));
+}
+
+function feedLine(cls, text) {
+  const feed = $("#feed");
+  const stick = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 30;
+  const line = h("div", { class: cls, text });
+  feed.append(line);
+  while (feed.childElementCount > 600) feed.firstChild.remove();
+  if (stick) feed.scrollTop = feed.scrollHeight;
+  return line;
+}
+
+function renderEvent(ev) {
+  switch (ev.type) {
+    case "step": feedLine("f-step", `▸ ${ev.text}`); break;
+    case "activity": feedLine("f-act", `· ${ev.words}`); break;
+    case "text": {
+      const last = $("#feed").lastElementChild;
+      if (last && last.classList.contains("f-text")) last.textContent += ev.text; else feedLine("f-text", ev.text);
+      break;
+    }
+    case "error": feedLine("f-err", `! ${ev.message}${ev.remediation ? "\n  " + ev.remediation : ""}`); break;
+    case "note": feedLine("f-note", `+ ${ev.text}`); break;
+    case "answered": feedLine("f-note", `✓ You answered${ev.answer.allow === false ? ": refused" : ev.answer.allow ? ": allowed" : ""}`); break;
+    case "check": feedLine("f-step", `✔ Check ${ev.check.round}: ${ev.check.similarity != null ? Math.round(ev.check.similarity) + "% alike, " : ""}${ev.check.note || ""}`); break;
+    case "preview": feedLine("f-act", `Preview: ${ev.url}`); break;
+    case "finished": feedLine(ev.ok ? "f-step" : "f-err", ev.ok ? `Done. ${ev.message}` : ev.message); break;
+    case "log": feedLine("f-log", ev.text); break;
+    default: break;
+  }
+}
+
+$("#build-stop").addEventListener("click", async () => {
+  if (!craftState.current) return;
+  try { await api(`/craft/runs/${craftState.current}/stop`, { method: "POST" }); } catch (err) { feedLine("f-err", err.message); }
+});
+$("#followup-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = $("#followup-input").value.trim();
+  if (!text) return;
+  try {
+    const run = craftState.current
+      ? await api(`/craft/runs/${craftState.current}/followup`, { method: "POST", json: { request: text } })
+      : await api(`/craft/projects/followup?path=${encodeURIComponent(craftState.project.path)}`, { method: "POST", json: { request: text } });
+    $("#followup-input").value = "";
+    await refreshBuildList();
+    openRun(run.id);
+  } catch (err) { feedLine("f-err", err.message); }
+});
+
 /* ================================================================ sign in */
 function showLogin(status = state.auth) {
   const mode = status && status.needs_setup ? "setup" : state.loginMode;
@@ -650,6 +892,8 @@ async function boot() {
     renderTiles();
     await loadFiles();
     loadChatList();
+    loadCraft();
+    showView(store.get("mb_view") === "media" ? "media" : "craft");
     pill.textContent = "Workshop open"; pill.className = "pill ok";
     if (!log.children.length) greet();
   } catch (e) {

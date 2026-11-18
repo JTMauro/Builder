@@ -58,7 +58,7 @@ def test_status_and_full_run_with_approval():
         run, events = follow(c, rid, lambda run, ev: run["finished_at"] is not None)
         assert run["status"] == "done" and run["message"] == "Built"
         assert run["checks"][0]["similarity"] == 87.5 and run["preview"] == "http://127.0.0.1:5199/"
-        assert run["step"] == "inspecting" and run["project"].endswith("made-by-test")
+        assert run["step"] == "study" and run["project"].endswith("made-by-test")
         # the project shows up, and its check screenshot can be fetched; outside paths can't
         projects = c.get("/craft/projects").json()
         assert projects[0]["name"] == "Made by test" and projects[0]["last_check"]["similarity"] == 87.5

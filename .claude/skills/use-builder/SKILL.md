@@ -5,8 +5,11 @@ description: Use the Builder media backend (audio/video tools, Rivet the Claude 
 
 # Using Builder
 
-Builder is a Python (FastAPI + ffmpeg) service in this repository. It offers 18 media operations
-through three doors that share one registry (`media_backend/ops.py`):
+Builder runs on the Craft Anything engine (`engine/`): it studies a website, app or game and has a
+coding agent build your own version, checked against the original. Use the `craft_build_*` tools
+(or `POST /craft/runs`) for that; see README "Craft builds". It also has its own audio/video
+workshop: a Python (FastAPI + ffmpeg) service offering 18 media operations through three doors that
+share one registry (`media_backend/ops.py`):
 
 1. **MCP connector** (best for Claude Code): tools such as `trim`, `add_text`, `images_to_video`,
    `animate_image`, `import_path`, `export_file`, `view_file`, `ask_assistant`.
