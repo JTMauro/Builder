@@ -60,7 +60,26 @@ Open `http://127.0.0.1:8000/` for the **Builder** web app. API docs are at `http
   operation's schema, so new operations appear automatically.
 - **Jobs:** live status. Results open in the preview, and the mascot hammers away while anything is running.
 - **Chat:** talk to the assistant, which can see the selected file. Click the mascot to jump to the chat.
-- Light and dark themes, responsive down to phone width. If the server has a token, the page asks for it once.
+- Light and dark themes, responsive down to phone width.
+
+### Accounts and sign-in
+
+Everyone signs in with their own Builder account. Nobody using the app ever sees an API key: you
+set one `ANTHROPIC_API_KEY` on the server, and the assistant uses it for everyone.
+
+- **First visit:** the sign-in screen asks you to create the first account, which becomes the admin.
+- **Adding people:** admins add people under *your name → Manage people* and share a starting password.
+  Each person can change it under *Change password*. To let anyone create their own account, set
+  `MEDIA_BACKEND_OPEN_SIGNUP=on`.
+- **Private chats:** each person's chats with the assistant are private, saved, and listed under
+  *Your saved chats*. They survive restarts. The media library is shared by everyone on the server.
+- **Claude Code per person:** *Connect Claude Code* makes a personal token and gives you a ready-made
+  `claude mcp add ...` command. Tokens can be revoked at any time.
+- **Security:** passwords are hashed with scrypt. Sign-in uses an HttpOnly, SameSite cookie lasting
+  30 days. After 5 wrong passwords there's a 10-minute lockout. Changing your password signs you out everywhere.
+
+Note: people can't sign in with their personal Claude.ai accounts. Third-party apps can't use those
+subscriptions, so the assistant runs on the server's API key.
 
 ## Connect Claude Code
 
@@ -73,10 +92,11 @@ claude mcp add media -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -- media-backend mc
 
 Or commit the included `.mcp.json` to a project, and everyone who opens it in Claude Code gets the connector.
 
-**Remote server (HTTP):** run `media-backend serve --host 0.0.0.0` with `MEDIA_BACKEND_TOKEN` set, then
+**Remote server (HTTP):** run `media-backend serve --host 0.0.0.0` (behind HTTPS), sign in, and use
+*your name → Connect Claude Code*. It gives you a command like this one:
 
 ```bash
-claude mcp add --transport http media https://YOUR-HOST:8000/mcp/ --header "Authorization: Bearer $MEDIA_BACKEND_TOKEN"
+claude mcp add --transport http builder https://YOUR-HOST/mcp/ --header "Authorization: Bearer mbp_..."
 ```
 
 Over HTTP, `import_path`/`export_file` refer to the *server's* disk. Use `import_url`, or upload with
@@ -104,11 +124,18 @@ assets/theme.mp3 as the soundtrack, add the title 'Episode 1', and export it to 
 | `POST /jobs[?wait=true]` `{operation, params}` | Start an operation (background, or wait for it) |
 | `POST /ops/{operation}` `{...params}` | Run an operation and wait |
 | `GET /jobs/{id}[?wait=30]` | Job status, outputs, error |
-| `POST /assistant/chat` `{message, session_id?, file_ids?}` | Talk to the assistant |
-| `DELETE /assistant/sessions/{id}` | Forget a conversation |
+| `POST /assistant/chat` `{message, session_id?, file_ids?}` | Talk to the assistant (as the signed-in person) |
+| `GET /assistant/sessions`, `GET/DELETE /assistant/sessions/{id}` | Your saved chats |
+| `GET /auth/status`, `POST /auth/setup` / `login` / `signup` / `logout` / `password` | Accounts |
+| `GET/POST /auth/tokens`, `DELETE /auth/tokens/{id}` | Personal access tokens |
+| `GET/POST /auth/users`, `DELETE /auth/users/{id}` | Manage people (admins) |
+
+Scripts authenticate with `Authorization: Bearer <personal token>`. Browser requests use the sign-in
+cookie and must send `X-Builder: 1` on writes, which blocks cross-site form posts.
 
 ```bash
 ID=$(curl -s -F file=@intro.mp4 localhost:8000/files | jq -r .id)
+# Use a personal token from "Connect Claude Code": add -H "Authorization: Bearer mbp_..." to each call
 curl -s -X POST localhost:8000/ops/trim -H 'content-type: application/json' -d "{\"file_id\":\"$ID\",\"start\":2,\"duration\":5}"
 curl -s -X POST localhost:8000/assistant/chat -H 'content-type: application/json' \
   -d "{\"message\":\"Make a 3 second GIF of the best moment\",\"file_ids\":[\"$ID\"]}"
@@ -121,7 +148,9 @@ You can also talk to the assistant in a terminal with `media-backend chat`.
 | Variable | Default | Meaning |
 |---|---|---|
 | `MEDIA_BACKEND_DATA` | `./media-data` | Where files are stored |
-| `MEDIA_BACKEND_TOKEN` | *(none)* | If set, every route except `/health` (including `/mcp`) needs `Authorization: Bearer <token>` |
+| `MEDIA_BACKEND_AUTH` | `on` | Sign-in required for the app, API and `/mcp`. `off` opens everything (only on a machine nobody else can reach) |
+| `MEDIA_BACKEND_OPEN_SIGNUP` | `off` | Let anyone create an account from the sign-in screen |
+| `MEDIA_BACKEND_TOKEN` | *(none)* | Optional shared service token for scripts (`Authorization: Bearer <token>`); people should use personal tokens instead |
 | `MEDIA_BACKEND_ALLOWED_DIRS` | current directory | Directories (`:`-separated) that `import_path`/`export_file` may touch |
 | `MEDIA_BACKEND_MAX_UPLOAD_MB` | `2048` | Upload size limit |
 | `MEDIA_BACKEND_WORKERS` | `2` | Parallel ffmpeg jobs |
@@ -147,6 +176,6 @@ pip install -e '.[dev]' && pytest -q
 
 ## Notes
 
-- Jobs and assistant conversations are kept in memory, so they reset when the server restarts.
-  Files persist on disk.
+- Jobs are kept in memory, so they reset when the server restarts. Files, accounts and chats persist
+  on disk, with accounts and chats in `MEDIA_BACKEND_DATA/builder.db`.
 - No speech-to-text or AI image/voice generation yet. Those would be new operations.

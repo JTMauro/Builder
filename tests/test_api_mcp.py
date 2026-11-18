@@ -12,6 +12,9 @@ from media_backend.mcp_server import build_server
 
 
 def test_http_api_flow(media, monkeypatch):
+    from media_backend import config
+    monkeypatch.setenv("MEDIA_BACKEND_AUTH", "off")
+    config.reset_settings()
     with TestClient(create_app()) as c:
         assert c.get("/health").json()["ok"]
         assert any(o["name"] == "animate_image" for o in c.get("/operations").json())
@@ -30,7 +33,10 @@ def test_http_api_flow(media, monkeypatch):
         assert c.delete(f"/files/{out}").status_code == 204
 
 
-def test_token_auth(media, monkeypatch):
+H = {"X-Builder": "1"}
+
+
+def test_server_token_still_works(media, monkeypatch):
     from media_backend import config
     monkeypatch.setenv("MEDIA_BACKEND_TOKEN", "s3cret")
     config.reset_settings()
@@ -39,6 +45,104 @@ def test_token_auth(media, monkeypatch):
         assert c.get("/files").status_code == 401
         assert c.post("/mcp/", json={}).status_code == 401
         assert c.get("/files", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+        assert c.get("/files", headers={"Authorization": "Bearer wrong"}).status_code == 401
+
+
+def test_accounts_and_login(media):
+    with TestClient(create_app()) as c:
+        st = c.get("/auth/status").json()
+        assert st["needs_setup"] and st["user"] is None
+        assert c.get("/files").status_code == 401
+        # first account becomes admin and is signed in
+        r = c.post("/auth/setup", json={"username": "maker", "password": "hammer-time", "display_name": "Maker"})
+        assert r.status_code == 200 and r.json()["user"]["is_admin"]
+        assert "httponly" in r.headers["set-cookie"].lower()
+        assert c.post("/auth/setup", json={"username": "x2", "password": "whatever123"}).status_code == 409
+        assert c.get("/files").status_code == 200
+        # cookie writes need our header (blocks cross-site form posts)
+        assert c.post("/auth/users", json={"username": "sam", "password": "sawdust99"}).status_code == 403
+        r = c.post("/auth/users", headers=H, json={"username": "sam", "password": "sawdust99", "display_name": "Sam"})
+        assert r.status_code == 201 and not r.json()["is_admin"]
+        assert c.post("/auth/users", headers=H, json={"username": "sam", "password": "sawdust99"}).status_code == 422
+        assert c.post("/auth/users", headers=H, json={"username": "al", "password": "short"}).status_code == 422
+        # sign out, then wrong and right passwords
+        assert c.post("/auth/logout", headers=H).status_code == 204
+        assert c.get("/files").status_code == 401
+        assert c.post("/auth/login", json={"username": "sam", "password": "nope-nope"}).status_code == 401
+        r = c.post("/auth/login", json={"username": "SAM", "password": "sawdust99"})
+        assert r.status_code == 200 and r.json()["user"]["username"] == "sam"
+        # non-admins can't manage people
+        assert c.get("/auth/users").status_code == 403
+        # personal token for Claude Code: shown once, works as a bearer token (incl. MCP), can be revoked
+        t = c.post("/auth/tokens", headers=H, json={"name": "laptop"}).json()
+        assert t["token"].startswith("mbp_") and t["hint"] == t["token"][-4:]
+        assert all("token" not in x for x in c.get("/auth/tokens").json())
+        anon = TestClient(c.app)
+        assert anon.get("/files").status_code == 401
+        assert anon.get("/files", headers={"Authorization": f"Bearer {t['token']}"}).status_code == 200
+        assert c.delete(f"/auth/tokens/{t['id']}", headers=H).status_code == 204
+        assert anon.get("/files", headers={"Authorization": f"Bearer {t['token']}"}).status_code == 401
+        # password change signs you out everywhere
+        assert c.post("/auth/password", headers=H, json={"current_password": "bad", "new_password": "newpass123"}).status_code == 401
+        assert c.post("/auth/password", headers=H, json={"current_password": "sawdust99", "new_password": "newpass123"}).status_code == 204
+        assert c.get("/files").status_code == 401
+        assert c.post("/auth/login", json={"username": "sam", "password": "newpass123"}).status_code == 200
+
+
+def test_login_lockout(media):
+    with TestClient(create_app()) as c:
+        c.post("/auth/setup", json={"username": "maker", "password": "hammer-time"})
+        c.post("/auth/logout", headers=H)
+        for _ in range(5):
+            assert c.post("/auth/login", json={"username": "maker", "password": "wrong-pass"}).status_code == 401
+        assert c.post("/auth/login", json={"username": "maker", "password": "hammer-time"}).status_code == 429
+
+
+def test_open_signup(media, monkeypatch):
+    from media_backend import config
+    with TestClient(create_app()) as c:
+        c.post("/auth/setup", json={"username": "maker", "password": "hammer-time"})
+        assert c.post("/auth/signup", json={"username": "kid", "password": "drawings1"}).status_code == 403
+        monkeypatch.setenv("MEDIA_BACKEND_OPEN_SIGNUP", "on")
+        config.reset_settings()
+        r = c.post("/auth/signup", json={"username": "kid", "password": "drawings1"})
+        assert r.status_code == 200 and not r.json()["user"]["is_admin"]
+
+
+def test_chats_are_private_per_user(media):
+    from media_backend import assistant as amod, users
+
+    class Reply:
+        def create(self, **kw):
+            text = "Hello " + kw["messages"][0]["content"][:5]
+            return SimpleNamespace(stop_reason="end_turn", content=[_block(type="text", text=text)])
+
+    amod._assistant = amod.Assistant(client=SimpleNamespace(beta=SimpleNamespace(messages=Reply())), store=users.get_store())
+    with TestClient(create_app()) as alice:
+        alice.post("/auth/setup", json={"username": "alice", "password": "password1"})
+        alice.post("/auth/users", headers=H, json={"username": "bob", "password": "password2"})
+        r = alice.post("/assistant/chat", headers=H, json={"message": "alice secret plan"}).json()
+        sid = r["session_id"]
+        assert alice.post("/assistant/chat", headers=H, json={"message": "more", "session_id": sid}).status_code == 200
+        chats = alice.get("/assistant/sessions").json()
+        assert [x["id"] for x in chats] == [sid] and chats[0]["title"] == "alice secret plan"
+        t = alice.get(f"/assistant/sessions/{sid}").json()["messages"]
+        assert [m["role"] for m in t] == ["user", "assistant", "user", "assistant"]
+
+        bob = TestClient(alice.app)
+        bob.post("/auth/login", json={"username": "bob", "password": "password2"})
+        assert bob.get("/assistant/sessions").json() == []
+        assert bob.get(f"/assistant/sessions/{sid}").status_code == 404
+        assert bob.post("/assistant/chat", headers=H, json={"message": "hi", "session_id": sid}).status_code == 404
+        assert bob.delete(f"/assistant/sessions/{sid}", headers=H).status_code == 404
+
+    # chats survive a restart (fresh assistant, same database)
+    amod._assistant = amod.Assistant(client=SimpleNamespace(beta=SimpleNamespace(messages=Reply())), store=users.get_store())
+    with TestClient(create_app()) as alice:
+        alice.post("/auth/login", json={"username": "alice", "password": "password1"})
+        assert len(alice.get(f"/assistant/sessions/{sid}").json()["messages"]) == 4
+        assert alice.delete(f"/assistant/sessions/{sid}", headers=H).status_code == 204
+        assert alice.get("/assistant/sessions").json() == []
 
 
 def test_mcp_tools(media):
@@ -130,10 +234,7 @@ def test_assistant_reports_tool_errors(media):
     assert m.last["messages"][-1]["content"][0]["is_error"] is True
 
 
-def test_frontend_served_without_token(monkeypatch):
-    from media_backend import config
-    monkeypatch.setenv("MEDIA_BACKEND_TOKEN", "s3cret")
-    config.reset_settings()
+def test_frontend_served_without_login():
     with TestClient(create_app()) as c:
         page = c.get("/")
         assert page.status_code == 200 and "Builder" in page.text and 'id="mascot"' in page.text

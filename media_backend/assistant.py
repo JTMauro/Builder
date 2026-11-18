@@ -90,7 +90,13 @@ class AssistantNotConfigured(RuntimeError):
 
 class Session(BaseModel):
     id: str
+    owner: str = "local"
+    title: str = ""
     messages: list[dict[str, Any]] = []
+
+
+class ChatNotFound(KeyError):
+    """No chat with that id belongs to this user."""
 
 
 class ChatResult(BaseModel):
@@ -102,8 +108,9 @@ class ChatResult(BaseModel):
 
 
 class Assistant:
-    def __init__(self, client: anthropic.Anthropic | None = None, max_sessions: int = 200):
+    def __init__(self, client: anthropic.Anthropic | None = None, max_sessions: int = 200, store=None):
         self._client = client
+        self._store = store  # users.UserStore for persistence; None keeps chats in memory only
         self._sessions: OrderedDict[str, Session] = OrderedDict()
         self._locks: dict[str, threading.Lock] = {}
         self._guard = threading.Lock()
@@ -118,24 +125,62 @@ class Assistant:
 
     # -------------------------------------------------------------- sessions
 
-    def _session(self, session_id: str | None) -> tuple[Session, threading.Lock]:
+    def _session(self, session_id: str | None, owner: str) -> tuple[Session, threading.Lock]:
         with self._guard:
-            sid = session_id or uuid.uuid4().hex[:12]
-            sess = self._sessions.get(sid)
-            if sess is None:
-                sess = Session(id=sid)
-                self._sessions[sid] = sess
-                self._locks[sid] = threading.Lock()
+            if session_id is None:
+                sess = Session(id=uuid.uuid4().hex[:12], owner=owner)
+            else:
+                sess = self._sessions.get(session_id)
+                if sess is None and self._store is not None:
+                    saved = self._store.load_chat(session_id)
+                    if saved is not None:
+                        sess = Session(id=saved["id"], owner=saved["owner"], title=saved["title"], messages=saved["messages"])
+                if sess is None or sess.owner != owner:
+                    raise ChatNotFound(session_id)
+            if sess.id not in self._sessions:
+                self._sessions[sess.id] = sess
+                self._locks[sess.id] = threading.Lock()
                 while len(self._sessions) > self._max_sessions:
                     old, _ = self._sessions.popitem(last=False)
                     self._locks.pop(old, None)
-            self._sessions.move_to_end(sid)
-            return sess, self._locks[sid]
+            self._sessions.move_to_end(sess.id)
+            return sess, self._locks[sess.id]
 
-    def reset(self, session_id: str) -> bool:
+    def _persist(self, sess: Session) -> None:
+        if self._store is not None:
+            self._store.save_chat(sess.id, sess.owner, sess.title, sess.messages)
+
+    def reset(self, session_id: str, owner: str = "local") -> bool:
         with self._guard:
-            self._locks.pop(session_id, None)
-            return self._sessions.pop(session_id, None) is not None
+            sess = self._sessions.get(session_id)
+            if sess is not None and sess.owner != owner:
+                return False
+            if sess is not None:
+                self._sessions.pop(session_id, None)
+                self._locks.pop(session_id, None)
+        deleted = self._store.delete_chat(session_id, owner) if self._store is not None else False
+        return sess is not None or deleted
+
+    def list_chats(self, owner: str) -> list[dict[str, Any]]:
+        if self._store is not None:
+            return self._store.list_chats(owner)
+        return [{"id": x.id, "title": x.title, "updated_at": None} for x in self._sessions.values() if x.owner == owner]
+
+    def transcript(self, session_id: str, owner: str) -> list[dict[str, str]]:
+        """The visible conversation (user text and assistant text only) for redisplaying a saved chat."""
+        sess, lock = self._session(session_id, owner)
+        out: list[dict[str, str]] = []
+        with lock:
+            for m in sess.messages:
+                content = m["content"]
+                if m["role"] == "user" and isinstance(content, str):
+                    text = content.split("\n\n[Files attached", 1)[0]
+                    out.append({"role": "user", "text": text})
+                elif m["role"] == "assistant" and isinstance(content, list):
+                    text = "\n".join(b.get("text", "") for b in content if b.get("type") == "text").strip()
+                    if text:
+                        out.append({"role": "assistant", "text": text})
+        return out
 
     # -------------------------------------------------------------- tools
 
@@ -180,10 +225,13 @@ class Assistant:
 
     # -------------------------------------------------------------- chat
 
-    def chat(self, message: str, session_id: str | None = None, file_ids: list[str] | None = None) -> ChatResult:
+    def chat(self, message: str, session_id: str | None = None, file_ids: list[str] | None = None,
+             owner: str = "local") -> ChatResult:
         s = get_settings()
-        sess, lock = self._session(session_id)
+        sess, lock = self._session(session_id, owner)
         with lock:
+            if not sess.title:
+                sess.title = " ".join(message.split())[:60]
             text = message
             if file_ids:
                 text += "\n\n[Files attached to this message: " + ", ".join(file_ids) + "]"
@@ -249,8 +297,8 @@ class Assistant:
                 del history[checkpoint:]
                 raise
 
-    @staticmethod
-    def _result(sess: Session, reply: str, stop: str | None, calls, produced) -> ChatResult:
+    def _result(self, sess: Session, reply: str, stop: str | None, calls, produced) -> ChatResult:
+        self._persist(sess)
         return ChatResult(session_id=sess.id, reply=reply, stop_reason=stop, tool_calls=calls, new_files=produced)
 
 
@@ -260,5 +308,7 @@ _assistant: Assistant | None = None
 def get_assistant() -> Assistant:
     global _assistant
     if _assistant is None:
-        _assistant = Assistant()
+        from .users import get_store
+
+        _assistant = Assistant(store=get_store())
     return _assistant

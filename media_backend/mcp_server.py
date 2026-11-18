@@ -18,7 +18,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel, ValidationError
 
 from . import ops, storage
-from .assistant import AssistantNotConfigured, get_assistant
+from .assistant import AssistantNotConfigured, ChatNotFound, get_assistant
 from .config import get_settings
 from .jobs import get_queue
 
@@ -68,6 +68,8 @@ def _friendly(fn):
             return fn(*args, **kwargs)
         except storage.FileNotFound as e:
             raise ToolError(f"No file with id {e}") from e
+        except ChatNotFound as e:
+            raise ToolError(f"No assistant session {e}; omit session_id to start a new one") from e
         except _EXPECTED as e:
             raise ToolError(str(e)) from e
 
@@ -193,7 +195,7 @@ def build_server() -> MCPServer:
         """Hand a media task to the built-in Claude assistant, which plans and runs the operations itself and
         checks its own results. Pass the returned session_id to continue the same conversation."""
         start = time.time()
-        res = get_assistant().chat(message, session_id=session_id, file_ids=file_ids)
+        res = get_assistant().chat(message, session_id=session_id, file_ids=file_ids, owner="claude-code")
         return {
             "session_id": res.session_id,
             "reply": res.reply,

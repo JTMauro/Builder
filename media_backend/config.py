@@ -26,6 +26,10 @@ class Settings:
             if p
         )
     )
+    # Web/API login. "off" leaves every route open (only for a machine nobody else can reach).
+    auth_enabled: bool = field(default_factory=lambda: _env("MEDIA_BACKEND_AUTH", "on").lower() not in ("off", "0", "false", "no"))
+    # Let anyone create an account from the sign-in screen (otherwise an admin adds people).
+    open_signup: bool = field(default_factory=lambda: _env("MEDIA_BACKEND_OPEN_SIGNUP", "off").lower() in ("on", "1", "true", "yes"))
     max_upload_mb: int = field(default_factory=lambda: int(_env("MEDIA_BACKEND_MAX_UPLOAD_MB", "2048")))
     workers: int = field(default_factory=lambda: int(_env("MEDIA_BACKEND_WORKERS", "2")))
     ffmpeg: str = field(default_factory=lambda: _env("FFMPEG_BIN", "ffmpeg"))

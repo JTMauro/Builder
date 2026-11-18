@@ -26,13 +26,12 @@ const kind = (f) => (f.mime_type.startsWith("video/") ? "video" : f.mime_type.st
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /* ================================================================ API */
-let token = store.get("mb_token") || "";
+// Signed-in state lives in an HttpOnly cookie; every request just needs our marker header.
 async function api(path, opts = {}) {
-  const headers = { ...(opts.headers || {}) };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const headers = { "X-Builder": "1", ...(opts.headers || {}) };
   if (opts.json !== undefined) { headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(opts.json); }
-  const res = await fetch(path, { ...opts, headers });
-  if (res.status === 401) { askToken(); throw new Error("This server needs an access token"); }
+  const res = await fetch(path, { ...opts, headers, credentials: "same-origin" });
+  if (res.status === 401 && !path.startsWith("/auth/")) { showLogin(); throw new Error("Please sign in"); }
   if (res.status === 204) return null;
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -41,26 +40,10 @@ async function api(path, opts = {}) {
   }
   return body;
 }
-const contentUrl = (id) => `/files/${id}/content?inline=true${token ? `&access_token=${encodeURIComponent(token)}` : ""}`;
-
-function askToken() {
-  const dlg = $("#token-dialog");
-  $("#token-btn").hidden = false;
-  if (dlg.open) return;
-  $("#token-input").value = token;
-  dlg.showModal();
-}
-$("#token-dialog").addEventListener("close", () => {
-  if ($("#token-dialog").returnValue === "ok") {
-    token = $("#token-input").value.trim();
-    store.set("mb_token", token);
-    boot();
-  }
-});
-$("#token-btn").addEventListener("click", askToken);
+const contentUrl = (id) => `/files/${id}/content?inline=true`;
 
 /* ================================================================ state */
-const state = { files: [], ops: [], selected: null, checked: [], session: null, activeOp: null, busy: 0 };
+const state = { files: [], ops: [], selected: null, checked: [], session: null, activeOp: null, busy: 0, user: null, auth: null, loginMode: "login" };
 
 const OP_META = {
   probe: ["🔍", "Inspect"], convert: ["🔁", "Convert"], trim: ["✂️", "Trim"], extract_audio: ["🎧", "Extract audio"],
@@ -355,10 +338,42 @@ function greet() {
   log.replaceChildren();
   addMsg("bot", `Hi! I'm ${$("#bot-name").textContent}. Tell me what you want to make: trim a clip, add music, caption it, or animate your drawings. I'll build it and check the result.`);
 }
-$("#chat-reset").addEventListener("click", async () => {
-  if (state.session) api(`/assistant/sessions/${state.session}`, { method: "DELETE" }).catch(() => {});
+$("#chat-reset").addEventListener("click", () => {
   state.session = null;
+  $("#chat-history").value = "";
+  $("#chat-delete").hidden = true;
   greet();
+  $("#chat-input").focus();
+});
+async function loadChatList() {
+  const sel = $("#chat-history");
+  try {
+    const chats = await api("/assistant/sessions");
+    sel.replaceChildren(h("option", { value: "", text: chats.length ? `Your saved chats (${chats.length})` : "No saved chats yet" }));
+    for (const c of chats) {
+      const when = c.updated_at ? new Date(c.updated_at * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+      sel.append(h("option", { value: c.id, text: `${c.title || "Untitled chat"}${when ? " · " + when : ""}` }));
+    }
+    sel.value = state.session || "";
+  } catch { /* chat list is optional */ }
+}
+$("#chat-history").addEventListener("change", async (e) => {
+  const id = e.target.value;
+  if (!id) return;
+  try {
+    const t = await api(`/assistant/sessions/${id}`);
+    state.session = id;
+    log.replaceChildren();
+    for (const m of t.messages) addMsg(m.role === "user" ? "user" : "bot", m.text);
+    if (!t.messages.length) greet();
+    $("#chat-delete").hidden = false;
+  } catch (err) { addMsg("bot error", err.message); }
+});
+$("#chat-delete").addEventListener("click", async () => {
+  if (!state.session || !confirm("Delete this chat? This can't be undone.")) return;
+  await api(`/assistant/sessions/${state.session}`, { method: "DELETE" }).catch(() => {});
+  $("#chat-reset").click();
+  loadChatList();
 });
 $("#chat-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#chat-form").requestSubmit(); }
@@ -384,6 +399,8 @@ $("#chat-form").addEventListener("submit", async (e) => {
       extras.push(h("div", { class: "made" }, ...finals.map((f) => h("button", { type: "button", onclick: () => select(f.id), text: `▶ ${f.name}` }))));
     }
     addMsg("bot", res.reply || "(no reply)", extras);
+    $("#chat-delete").hidden = false;
+    loadChatList();
     if (res.new_files.length) await loadFiles(res.new_files[res.new_files.length - 1].id);
   } catch (err) {
     typing.remove();
@@ -482,11 +499,149 @@ mascot.addEventListener("click", () => {
   $("#chat-input").focus();
 });
 
+/* ================================================================ sign in */
+function showLogin(status = state.auth) {
+  const mode = status && status.needs_setup ? "setup" : state.loginMode;
+  state.loginMode = mode;
+  $("#user-wrap").hidden = true;
+  const pill = $("#server-status");
+  pill.textContent = "Signed out"; pill.className = "pill bad";
+  const copy = {
+    login: ["Welcome back", "Sign in to your Builder workshop.", "Sign in", "New here? Create an account"],
+    signup: ["Join the workshop", "Make your own account. Your chats stay private to you.", "Create account", "Already have an account? Sign in"],
+    setup: ["Set up Builder", "Create the first account. It will be the admin, who can add everyone else.", "Create admin account", ""],
+  }[mode];
+  $("#login-title").textContent = copy[0];
+  $("#login-sub").textContent = copy[1];
+  $("#login-submit").textContent = copy[2];
+  const sw = $("#login-switch");
+  sw.hidden = mode === "setup" || !(status && status.signup_open);
+  sw.textContent = copy[3];
+  $("#login-display-wrap").hidden = mode === "login";
+  $("#login-password").autocomplete = mode === "login" ? "current-password" : "new-password";
+  $("#login-error").textContent = "";
+  $("#login").hidden = false;
+  setTimeout(() => $("#login-username").focus(), 50);
+}
+$("#login-switch").addEventListener("click", () => { state.loginMode = state.loginMode === "login" ? "signup" : "login"; showLogin(); });
+$("#login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = $("#login-submit"), err = $("#login-error");
+  const body = { username: $("#login-username").value.trim(), password: $("#login-password").value, display_name: $("#login-display").value.trim() };
+  if (!body.username || !body.password) { err.textContent = "Enter your username and password"; return; }
+  btn.disabled = true; err.textContent = "";
+  try {
+    const path = { login: "/auth/login", signup: "/auth/signup", setup: "/auth/setup" }[state.loginMode];
+    await api(path, { method: "POST", json: body });
+    $("#login-password").value = "";
+    $("#login").hidden = true;
+    state.session = null;
+    log.replaceChildren();
+    await boot();
+  } catch (ex) { err.textContent = ex.message; } finally { btn.disabled = false; }
+});
+
+function showUser(user) {
+  state.user = user;
+  const wrap = $("#user-wrap");
+  if (!state.auth || !state.auth.auth_enabled || !user) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  $("#user-name").textContent = user.display_name;
+  $("#user-avatar").textContent = (user.display_name || user.username).trim().charAt(0).toUpperCase();
+  $("#menu-users").hidden = !user.is_admin;
+}
+const menu = $("#user-menu");
+$("#user-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  menu.hidden = !menu.hidden;
+  $("#user-btn").setAttribute("aria-expanded", String(!menu.hidden));
+});
+document.addEventListener("click", () => { menu.hidden = true; $("#user-btn").setAttribute("aria-expanded", "false"); });
+document.querySelectorAll("dialog [data-close]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); b.closest("dialog").close(); }));
+menu.addEventListener("click", async (e) => {
+  const action = e.target.closest("[data-action]")?.dataset.action;
+  if (action === "logout") {
+    await api("/auth/logout", { method: "POST" }).catch(() => {});
+    state.loginMode = "login"; state.session = null; log.replaceChildren();
+    $("#chat-history").replaceChildren(h("option", { value: "", text: "Your saved chats" }));
+    showLogin();
+  } else if (action === "tokens") { openTokens(); }
+  else if (action === "users") { openUsers(); }
+  else if (action === "password") { $("#password-form").reset(); $("#pw-status").textContent = ""; $("#password-dialog").showModal(); }
+});
+
+/* personal tokens for Claude Code */
+async function openTokens() {
+  $("#token-new").hidden = true;
+  $("#tokens-dialog").showModal();
+  await renderTokens();
+}
+async function renderTokens() {
+  const list = $("#token-list");
+  const tokens = await api("/auth/tokens").catch(() => []);
+  list.replaceChildren(...(tokens.length ? tokens.map((t) => h("div", { class: "row" },
+    h("div", { class: "grow" }, h("strong", { text: t.name }), h("small", { text: `…${t.hint} · made ${new Date(t.created_at * 1000).toLocaleDateString()}${t.last_used_at ? " · last used " + new Date(t.last_used_at * 1000).toLocaleDateString() : " · never used"}` })),
+    h("button", { class: "btn ghost small", type: "button", text: "Revoke", onclick: async () => { await api(`/auth/tokens/${t.id}`, { method: "DELETE" }); renderTokens(); } })))
+    : [h("div", { class: "muted small-text", text: "No tokens yet." })]));
+}
+$("#token-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const t = await api("/auth/tokens", { method: "POST", json: { name: $("#token-name").value.trim() || "Claude Code" } });
+  $("#token-name").value = "";
+  $("#token-cmd").textContent = `claude mcp add --transport http builder ${location.origin}/mcp/ --header "Authorization: Bearer ${t.token}"`;
+  $("#token-new").hidden = false;
+  renderTokens();
+});
+$("#token-copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("#token-cmd").textContent); $("#token-copy").textContent = "Copied ✓"; }
+  catch { $("#token-copy").textContent = "Select and copy the text above"; }
+  setTimeout(() => { $("#token-copy").textContent = "Copy command"; }, 2000);
+});
+
+/* people (admins) */
+async function openUsers() { $("#users-dialog").showModal(); await renderUsers(); }
+async function renderUsers() {
+  const users = await api("/auth/users").catch(() => []);
+  $("#user-list").replaceChildren(...users.map((u) => h("div", { class: "row" },
+    h("span", { class: "avatar", text: u.display_name.charAt(0).toUpperCase() }),
+    h("div", { class: "grow" }, h("strong", { text: u.display_name }), h("small", { text: `@${u.username}` })),
+    u.is_admin ? h("span", { class: "tag", text: "admin" }) : null,
+    u.id === state.user.id ? h("span", { class: "muted small-text", text: "you" }) :
+      h("button", { class: "btn ghost small", type: "button", text: "Remove", onclick: async () => {
+        if (!confirm(`Remove ${u.display_name}? Their sign-ins and tokens stop working.`)) return;
+        await api(`/auth/users/${u.id}`, { method: "DELETE" }); renderUsers();
+      } }))));
+}
+$("#add-user-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const status = $("#nu-status");
+  try {
+    await api("/auth/users", { method: "POST", json: { username: $("#nu-username").value.trim(), display_name: $("#nu-display").value.trim(), password: $("#nu-password").value, is_admin: $("#nu-admin").checked } });
+    status.textContent = "Added. Share their username and starting password with them.";
+    e.target.reset();
+    renderUsers();
+  } catch (err) { status.textContent = err.message; }
+});
+
+$("#password-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const st = $("#pw-status");
+  try {
+    await api("/auth/password", { method: "POST", json: { current_password: $("#pw-current").value, new_password: $("#pw-new").value } });
+    $("#password-dialog").close();
+    state.loginMode = "login";
+    showLogin();
+    $("#login-error").textContent = "Password changed. Sign in with your new password.";
+  } catch (err) { st.textContent = err.message; }
+});
+
 /* ================================================================ boot */
 async function boot() {
   const pill = $("#server-status");
   try {
-    await api("/health");
+    state.auth = await api("/auth/status");
+    if (state.auth.auth_enabled && !state.auth.user) { showLogin(state.auth); return; }
+    showUser(state.auth.user);
     const [info, ops] = await Promise.all([api("/assistant/info"), api("/operations")]);
     $("#bot-name").textContent = info.name;
     mascot.setAttribute("title", `${info.name}: click to chat`);
@@ -494,10 +649,11 @@ async function boot() {
     state.ops = ops;
     renderTiles();
     await loadFiles();
+    loadChatList();
     pill.textContent = "Workshop open"; pill.className = "pill ok";
     if (!log.children.length) greet();
   } catch (e) {
-    pill.textContent = e.message.includes("token") ? "Needs access token" : "Server offline"; pill.className = "pill bad";
+    if ($("#login").hidden) { pill.textContent = "Server offline"; pill.className = "pill bad"; }
   }
 }
 

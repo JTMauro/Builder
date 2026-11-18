@@ -105,7 +105,17 @@
       </div>
       <div class="top-actions">
         <span id="server-status" class="pill">Connecting…</span>
-        <button id="token-btn" class="btn ghost small" type="button" hidden>Access token</button>
+        <div class="user-wrap" id="user-wrap" hidden>
+          <button id="user-btn" class="user-btn" type="button" aria-haspopup="menu" aria-expanded="false">
+            <span class="avatar" id="user-avatar">?</span><span id="user-name"></span><span class="caret">▾</span>
+          </button>
+          <div id="user-menu" class="menu" role="menu" hidden>
+            <button type="button" role="menuitem" data-action="tokens">🔌 Connect Claude Code</button>
+            <button type="button" role="menuitem" data-action="users" id="menu-users" hidden>👥 Manage people</button>
+            <button type="button" role="menuitem" data-action="password">🔑 Change password</button>
+            <button type="button" role="menuitem" data-action="logout">🚪 Sign out</button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -163,6 +173,10 @@
           <h2 id="chat-h">Ask <span id="bot-name">Rivet</span></h2>
           <button type="button" id="chat-reset" class="btn ghost small">New chat</button>
         </div>
+        <div class="chat-tools">
+          <select id="chat-history" aria-label="Your saved chats"><option value="">Your saved chats</option></select>
+          <button type="button" id="chat-delete" class="btn ghost small" title="Delete this chat" aria-label="Delete this chat" hidden>🗑</button>
+        </div>
         <div id="chat-log" class="chat-log" aria-live="polite"></div>
         <form id="chat-form" class="chat-form">
           <label class="attach">
@@ -178,12 +192,60 @@
     </main>
   </div>
 
-  <dialog id="token-dialog">
-    <form method="dialog" class="token-form">
-      <h3>Access token</h3>
-      <p class="muted">This server needs a token. It's saved in this browser only.</p>
-      <input id="token-input" type="password" autocomplete="off" placeholder="MEDIA_BACKEND_TOKEN">
-      <div class="form-actions"><button class="btn primary" value="ok">Save</button><button class="btn ghost" value="cancel">Cancel</button></div>
+  <!-- ============================================================ sign in -->
+  <div id="login" hidden>
+    <form id="login-form" class="login-card" novalidate>
+      <h2 id="login-title">Welcome back</h2>
+      <p id="login-sub" class="muted">Sign in to your Builder workshop.</p>
+      <label class="field"><span>Username</span><input id="login-username" autocomplete="username" required></label>
+      <label class="field" id="login-display-wrap" hidden><span>Your name</span><input id="login-display" autocomplete="name"></label>
+      <label class="field"><span>Password</span><input id="login-password" type="password" autocomplete="current-password" required></label>
+      <div id="login-error" class="form-error" role="alert"></div>
+      <button class="btn primary wide" id="login-submit" type="submit">Sign in</button>
+      <button class="link-btn" id="login-switch" type="button" hidden>New here? Create an account</button>
+    </form>
+  </div>
+
+  <dialog id="tokens-dialog">
+    <div class="dialog-body">
+      <div class="op-form-head"><h3>Connect Claude Code</h3><button class="btn ghost small" data-close>✕</button></div>
+      <p class="muted">Make a personal token so your Claude Code can use this workshop as you. Each token is shown once.</p>
+      <form id="token-form" class="inline-form">
+        <input id="token-name" placeholder="Token name, e.g. My laptop" maxlength="60">
+        <button class="btn primary small" type="submit">Make token</button>
+      </form>
+      <div id="token-new" class="token-new" hidden>
+        <p><strong>Copy this command into a terminal on your computer:</strong></p>
+        <pre id="token-cmd"></pre>
+        <button class="btn ghost small" id="token-copy" type="button">Copy command</button>
+      </div>
+      <h4 class="section-label">Your tokens</h4>
+      <div id="token-list" class="rows"></div>
+    </div>
+  </dialog>
+
+  <dialog id="users-dialog">
+    <div class="dialog-body">
+      <div class="op-form-head"><h3>People</h3><button class="btn ghost small" data-close>✕</button></div>
+      <div id="user-list" class="rows"></div>
+      <h4 class="section-label">Add someone</h4>
+      <form id="add-user-form" class="fields">
+        <label class="field"><span>Username</span><input id="nu-username" required></label>
+        <label class="field"><span>Their name</span><input id="nu-display"></label>
+        <label class="field"><span>Starting password</span><input id="nu-password" type="text" minlength="8" required></label>
+        <label class="field check"><input id="nu-admin" type="checkbox"><span>Admin</span></label>
+        <div class="field wide"><button class="btn primary small" type="submit">Add person</button> <span id="nu-status" class="muted"></span></div>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog id="password-dialog">
+    <form id="password-form" class="dialog-body">
+      <div class="op-form-head"><h3>Change password</h3><button class="btn ghost small" type="button" data-close>✕</button></div>
+      <label class="field"><span>Current password</span><input id="pw-current" type="password" autocomplete="current-password" required></label>
+      <label class="field"><span>New password (8+ characters)</span><input id="pw-new" type="password" autocomplete="new-password" minlength="8" required></label>
+      <div id="pw-status" class="form-error"></div>
+      <div class="form-actions"><button class="btn primary" type="submit">Save</button></div>
     </form>
   </dialog>
 

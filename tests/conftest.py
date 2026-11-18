@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from media_backend import config, jobs, storage
+from media_backend import assistant, config, jobs, storage, users
 
 
 def _ff(*args):
@@ -14,8 +14,12 @@ def data_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIA_BACKEND_DATA", str(tmp_path / "data"))
     monkeypatch.setenv("MEDIA_BACKEND_ALLOWED_DIRS", str(tmp_path))
     monkeypatch.delenv("MEDIA_BACKEND_TOKEN", raising=False)
+    monkeypatch.delenv("MEDIA_BACKEND_AUTH", raising=False)
+    monkeypatch.delenv("MEDIA_BACKEND_OPEN_SIGNUP", raising=False)
     config.reset_settings()
     jobs._queue = None
+    users._store = None
+    assistant._assistant = None
     yield tmp_path
     config.reset_settings()
 
