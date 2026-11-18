@@ -17,7 +17,7 @@ from mcp.server.mcpserver import Context, Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel, ValidationError
 
-from . import ops, storage
+from . import __version__, ops, storage
 from .assistant import AssistantNotConfigured, ChatNotFound, get_assistant
 from .config import get_settings
 from .jobs import get_queue
@@ -122,7 +122,7 @@ def build_server(media_only: bool | None = None) -> MCPServer:
 
     if media_only is None:
         media_only = os.environ.get("MEDIA_BACKEND_MCP_MEDIA_ONLY") == "1"
-    mcp = _Server(name="media-backend", instructions=INSTRUCTIONS, version="0.1.0")
+    mcp = _Server(name="media-backend", instructions=INSTRUCTIONS, version=__version__)
 
     # ---------------------------------------------------------------- files
 

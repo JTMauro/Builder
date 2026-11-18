@@ -16,7 +16,7 @@ from typing import Any, Callable, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from . import storage
-from .config import get_settings
+from .config import NO_WINDOW, get_settings
 from .storage import FileInfo
 
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -64,7 +64,7 @@ def run_operation(name: str, params: dict[str, Any] | BaseModel) -> OpResult:
 
 def _run(args: list[str], timeout: int = 3600) -> str:
     try:
-        proc = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(args, capture_output=True, text=True, timeout=timeout, **NO_WINDOW)
     except FileNotFoundError as e:
         raise OpError(f"{args[0]} is not installed or not on PATH") from e
     except subprocess.TimeoutExpired as e:

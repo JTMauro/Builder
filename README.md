@@ -112,6 +112,27 @@ An audio/video processing backend you can reuse from any project. It has three p
 All three share one operation registry (`media_backend/ops.py`), so a new operation shows up in the
 API, the assistant and Claude Code at once.
 
+## Windows desktop server (Builder.exe)
+
+On Windows, Builder installs as a desktop server: `Builder.exe` runs the web app, the HTTP API and the
+MCP connector on http://127.0.0.1:8000 and sits in the tray (Open Builder, Connect Claude Code…,
+Settings, Start with Windows, Let other devices connect, Restart, Quit). ffmpeg and the Craft engine
+ship inside the install folder; nothing else needs installing.
+
+- **You:** open Builder from the tray or Start menu.
+- **Other apps:** send files to the HTTP API with a personal token (see HTTP API below).
+- **Claude Code on that PC:** tray > Connect Claude Code… > Make token, then run the command it shows.
+- Settings are in `%APPDATA%\Builder\builder.env` (API key, port, network access, allowed folders);
+  accounts, files and chats are in `%APPDATA%\Builder` too, so upgrades and reinstalls keep them.
+- `builder-cli.exe` in the install folder is the command line (`mcp`, `token`, `user add`, `doctor`,
+  `app --selftest`). `builder app` runs the same tray server from source on any system.
+
+**Building the installer** (Cydcor build standard, Path B): copy the repository to `C:\builder` and
+double-click `BUILD BUILDER.cmd`. It installs the tools with winget, compiles with PyInstaller, adds
+ffmpeg (checksum-verified) and the Craft engine, self-tests, signs everything with the Cydcor
+certificate, builds per-user and all-users Inno Setup installers plus a portable zip, verifies the
+signatures and opens `packaging\windows\installer\Output`. Details: `packaging/windows/INSTRUCTIONS.txt`.
+
 ## Use Builder from another project
 
 Other Claude Code chats and projects can use Builder in three ways: the MCP connector, the HTTP API,

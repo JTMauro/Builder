@@ -12,6 +12,7 @@ import subprocess
 from typing import Any
 
 from . import craft, storage
+from .config import NO_WINDOW
 
 MAX_FEED = 20
 
@@ -131,7 +132,7 @@ def engine_tools() -> list[dict[str, str]]:
     global _tool_list_cache
     if _tool_list_cache is None:
         out = subprocess.run([str(craft.engine_bin()), "commands", "--format", "json"], capture_output=True, text=True,
-                             env=craft.engine_env(), timeout=120, stdin=subprocess.DEVNULL)
+                             env=craft.engine_env(), timeout=120, stdin=subprocess.DEVNULL, **NO_WINDOW)
         tools: list[dict[str, str]] = []
         try:
             data = json.loads(out.stdout)
@@ -197,7 +198,7 @@ def call(name: str, args: dict[str, Any], owner: str) -> Any:
         out = subprocess.run(
             [str(craft.engine_bin()), tool.replace("_", "-"), "--json", json.dumps(args.get("params") or {})],
             capture_output=True, text=True, env=craft.engine_env(), timeout=900, stdin=subprocess.DEVNULL,
-            cwd=str(runs.projects_dir(owner)),
+            cwd=str(runs.projects_dir(owner)), **NO_WINDOW,
         )
         text = (out.stdout or out.stderr).strip()
         if out.returncode != 0:

@@ -272,7 +272,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health():
-        return {"ok": True, "version": __version__}
+        return {"ok": True, "app": "builder", "version": __version__}
 
     @app.get("/operations")
     def list_operations():

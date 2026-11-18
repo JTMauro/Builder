@@ -21,6 +21,8 @@ def main(argv: list[str] | None = None) -> None:
     serve.add_argument("--host", default="127.0.0.1", help="127.0.0.1 for this computer only; 0.0.0.0 to let other devices in")
     serve.add_argument("--port", type=int, default=8000)
     sub.add_parser("mcp", help="Run the MCP connector over stdio (what `claude mcp add` starts)")
+    app = sub.add_parser("app", help="Run Builder as a desktop server with a tray icon (what Builder.exe runs on Windows)")
+    app.add_argument("options", nargs="*", help="--selftest, --headless, --no-browser, --port N, --host H")
     chat = sub.add_parser("chat", help="Talk to Rivet in the terminal")
     chat.add_argument("message", nargs="*")
     setup = sub.add_parser("setup", help="Get this computer ready: build or install the Craft engine, check ffmpeg and the AI key")
@@ -36,7 +38,12 @@ def main(argv: list[str] | None = None) -> None:
     user.add_argument("username")
     user.add_argument("--display-name", default="")
     user.add_argument("--admin", action="store_true")
-    args = parser.parse_args(argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw[:1] == ["app"]:  # the desktop app has its own options (--selftest, --headless, ...)
+        from .winapp import main as app_main
+
+        sys.exit(app_main(raw[1:]))
+    args = parser.parse_args(raw)
 
     if args.cmd == "serve":
         import uvicorn
@@ -101,7 +108,9 @@ def _setup(args) -> int:
     ok = _ok(bool(shutil.which(s.ffmpeg) and shutil.which(s.ffprobe)), "ffmpeg and ffprobe")
     if not ok:
         print("    Install ffmpeg (macOS: brew install ffmpeg · Ubuntu: sudo apt install ffmpeg · Windows: winget install ffmpeg)")
-    dest = s.bin_dir / "craft-anything-cli"
+    from .config import exe_name
+
+    dest = s.bin_dir / exe_name("craft-anything-cli")
     if args.skip_engine:
         print("  - engine skipped")
     elif args.engine_bin:
@@ -121,7 +130,7 @@ def _setup(args) -> int:
         if built.returncode != 0:
             ok = _ok(False, "the engine didn't build; see the messages above")
         else:
-            shutil.copy2(target / profile / "craft-anything-cli", dest)
+            shutil.copy2(target / profile / exe_name("craft-anything-cli"), dest)
             dest.chmod(0o755)
             _ok(True, f"engine installed in {dest}")
     if not _ok(bool(os.environ.get("ANTHROPIC_API_KEY")), "ANTHROPIC_API_KEY (Rivet and Craft builds)"):

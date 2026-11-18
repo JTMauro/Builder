@@ -1,0 +1,15 @@
+{
+  "_help": "Read by build_signed_installer.ps1 (BUILD BUILDER.cmd). Cydcor build standard: SHARED/CODE/CertsandSisgns/SKILL.md. Never put passwords, private keys or .pfx files here.",
+  "mode": "local",
+  "local": {
+    "thumbprint": "FD0DC0C9FAE1C247E79C8388F81A3AFB0D742D3F",
+    "subject_fallback": "Cydcor",
+    "expires": "2028-10-06"
+  },
+  "timestamp_url": "http://timestamp.digicert.com",
+  "digest": "SHA256",
+  "description": "Builder",
+  "azure_trusted_signing": { "_status": "not set up yet", "endpoint": "", "account": "", "profile": "" },
+  "azure_key_vault": { "_status": "not set up yet", "vault_url": "", "certificate": "" },
+  "pfx": { "_status": "not set up yet", "path": "" }
+}

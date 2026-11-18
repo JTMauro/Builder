@@ -1,0 +1,38 @@
+BUILDER - Windows build (Cydcor build standard, Path B: everything on the build PC)
+==============================================================================
+
+1. Copy the whole Builder folder to C:\builder (not a network drive: the signing window
+   runs as Administrator and can't see mapped drives).
+2. If the kit came as a zip: right-click the zip > Properties > Unblock, then extract.
+3. Double-click  C:\builder\BUILD BUILDER.cmd
+
+The first run installs Python 3.13, Inno Setup 6 and the Windows SDK signing tools with winget,
+then every run: checks for tool updates, compiles with PyInstaller, downloads and checksum-checks
+ffmpeg, adds the Craft engine, runs the self-test, signs every unsigned file with the Cydcor
+certificate (FD0DC0C9..., expires 2028-10-06), builds both Inno Setup installers (signed, with
+signed uninstallers) and a portable zip, verifies every signature and opens:
+
+   C:\builder\packaging\windows\installer\Output\
+
+Options (run from PowerShell in C:\builder\packaging\windows):
+   .\build_signed_installer.ps1 -ListCertificates
+   .\build_signed_installer.ps1 -TimestampUrl http://timestamp.sectigo.com
+   .\build_signed_installer.ps1 -SignOne C:\path\file.exe
+   .\build_signed_installer.ps1 -SkipUpdateCheck
+   .\build_signed_installer.ps1 -Unsigned        (test build on a PC without the certificate)
+
+Craft engine: packaging\windows\prebuilt\craft-anything-cli.exe is used when present (compiled
+from engine\ in the Builder chat). Without it the script builds engine\ with Rust if cargo is
+installed (needs Visual Studio Build Tools).
+
+Version: media_backend\__init__.py and the two version lines in installer\version_info.txt must
+match; the script stops if they don't.
+
+Common failures
+---------------
+"signtool could not use the certificate"  UAC prompt declined, or the token is unplugged.
+Timestamp unreachable                     Use -TimestampUrl with a URL IT allows.
+SELFTEST FAILED                           Delete .venv, build and dist in packaging\windows, rebuild.
+"Unknown publisher"                       That PC doesn't trust the Cydcor CA.
+ffmpeg download checksum mismatch         Delete packaging\windows\cache and run again.
+Port 8000 is used by another program      Change BUILDER_PORT in %APPDATA%\Builder\builder.env.

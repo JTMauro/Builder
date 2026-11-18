@@ -1,0 +1,4 @@
+# Installed by build_signed_installer.ps1 into .venv (plus Builder itself from the repo root).
+pyinstaller>=6.22
+pystray>=0.19.5
+pillow>=12.0

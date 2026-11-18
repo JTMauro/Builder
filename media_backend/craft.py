@@ -22,7 +22,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from .config import get_settings
+from .config import FROZEN, IS_WINDOWS, NO_WINDOW, app_dir, builder_command, exe_name, get_settings
 
 ENGINE_DIR = Path(__file__).resolve().parent.parent / "engine"
 
@@ -38,10 +38,13 @@ class EngineMissing(RuntimeError):
 def engine_bin() -> Path:
     env = os.environ.get("CRAFT_ENGINE_BIN")
     candidates = [Path(env)] if env else []
-    candidates.append(get_settings().bin_dir / "craft-anything-cli")  # where `builder setup` installs it
+    name = exe_name("craft-anything-cli")
+    if FROZEN:
+        candidates.append(app_dir() / "engine" / name)  # shipped inside the Windows app
+    candidates.append(get_settings().bin_dir / name)  # where `builder setup` installs it
     target = os.environ.get("CARGO_TARGET_DIR")
     for base in ([Path(target)] if target else []) + [ENGINE_DIR / "target"]:
-        candidates += [base / "release" / "craft-anything-cli", base / "debug" / "craft-anything-cli"]
+        candidates += [base / "release" / name, base / "debug" / name]
     found = shutil.which("craft-anything-cli")
     if found:
         candidates.append(Path(found))
@@ -64,20 +67,33 @@ _ai_ready = False
 PLUGIN_ID = "builder_media"
 
 
+# Each build runs in its own process group so Stop reaches the engine and everything it started.
+_GROUP: dict = ({**NO_WINDOW, "creationflags": 0x08000000 | 0x00000200} if IS_WINDOWS  # NO_WINDOW | NEW_PROCESS_GROUP
+                else {"start_new_session": True})
+
+
+def _end_tree(proc: subprocess.Popen, grace: float = 5.0) -> None:
+    try:
+        proc.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, **NO_WINDOW)
+
+
 def _engine(*args: str, timeout: int = 120) -> subprocess.CompletedProcess:
     return subprocess.run([str(engine_bin()), *args], capture_output=True, text=True, env=engine_env(),
-                          timeout=timeout, stdin=subprocess.DEVNULL)
+                          timeout=timeout, stdin=subprocess.DEVNULL, **NO_WINDOW)
 
 
 def media_plugin_spec() -> dict[str, Any]:
     """Builder's own audio/video connector, as a plugin of the engine: Craft's builder can then trim,
     caption, score and animate media while it builds, reading and writing inside the projects folder."""
     s = get_settings()
+    cmd = builder_command("mcp")
     return {
         "id": PLUGIN_ID,
         "name": "Builder audio & video",
-        "command": sys.executable,
-        "args": ["-m", "media_backend.cli", "mcp"],
+        "command": cmd[0],
+        "args": cmd[1:],
         "env": {
             "MEDIA_BACKEND_DATA": str(s.data_dir),
             "MEDIA_BACKEND_ALLOWED_DIRS": str(s.data_dir / "projects"),
@@ -170,7 +186,7 @@ class Runs:
         log_path = self._dir() / f"{run.id}.jsonl"
         proc = subprocess.Popen(
             args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
-            env=engine_env(), start_new_session=True,
+            env=engine_env(), **_GROUP,
         )
         live = _Live(run, proc, log_path)
         with self._lock:
@@ -295,8 +311,15 @@ class Runs:
         live = self._live(run_id, owner)
         if live.proc.poll() is None:
             try:
-                os.killpg(live.proc.pid, signal.SIGINT)  # the engine stops its builder cleanly on Ctrl-C
-            except ProcessLookupError:
+                # The engine stops its builder cleanly on Ctrl-C (Ctrl-Break on Windows).
+                if IS_WINDOWS:
+                    live.proc.send_signal(signal.CTRL_BREAK_EVENT)
+                    # A windowed parent can't always reach the engine's hidden console: if it hasn't
+                    # stopped in a few seconds, end it and everything it started.
+                    threading.Thread(target=_end_tree, args=(live.proc,), daemon=True).start()
+                else:
+                    os.killpg(live.proc.pid, signal.SIGINT)
+            except (ProcessLookupError, OSError):
                 pass
         with live.lock:
             if live.run.finished_at is None:
@@ -313,7 +336,7 @@ class Runs:
 
 def engine_version() -> str:
     try:
-        out = subprocess.run([str(engine_bin()), "--version"], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+        out = subprocess.run([str(engine_bin()), "--version"], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL, **NO_WINDOW)
         return out.stdout.strip()
     except (OSError, subprocess.SubprocessError, EngineMissing):
         return ""

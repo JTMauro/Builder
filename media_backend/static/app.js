@@ -791,6 +791,8 @@ function showUser(user) {
   $("#user-name").textContent = user.display_name;
   $("#user-avatar").textContent = (user.display_name || user.username).trim().charAt(0).toUpperCase();
   $("#menu-users").hidden = !user.is_admin;
+  // The desktop app's tray menu opens Builder at #connect: go straight to Connect Claude Code.
+  if (location.hash === "#connect") { history.replaceState(null, "", location.pathname); openTokens(); }
 }
 const menu = $("#user-menu");
 $("#user-btn").addEventListener("click", (e) => {

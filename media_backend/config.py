@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import os
+import shutil
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+IS_WINDOWS = os.name == "nt"
+# True inside the packaged Windows app (PyInstaller sets sys.frozen).
+FROZEN = bool(getattr(sys, "frozen", False))
 
 
 def _env(name: str, default: str) -> str:
@@ -12,11 +18,52 @@ def _env(name: str, default: str) -> str:
     return value if value not in (None, "") else default
 
 
+# Extra subprocess options: on Windows, console programs (ffmpeg, the engine) run without flashing a
+# console window, and their output is read as UTF-8 rather than the system code page.
+NO_WINDOW: dict = {"creationflags": 0x08000000, "encoding": "utf-8", "errors": "replace"} if IS_WINDOWS else {}
+
+
+def exe_name(name: str) -> str:
+    """A program's file name on this computer (adds .exe on Windows)."""
+    return f"{name}.exe" if IS_WINDOWS and not name.lower().endswith(".exe") else name
+
+
+def app_dir() -> Path:
+    """The folder the packaged app is installed in (the one holding Builder.exe)."""
+    return Path(sys.executable).resolve().parent
+
+
+def _default_data_dir() -> str:
+    # Windows keeps user data in %APPDATA%\Builder (never in the install folder, so upgrades keep it).
+    if IS_WINDOWS and os.environ.get("APPDATA"):
+        return str(Path(os.environ["APPDATA"]) / "Builder")
+    return str(Path.home() / ".builder")
+
+
+def _default_tool(name: str) -> str:
+    """ffmpeg/ffprobe: the copy shipped with the Windows app first, then Builder's bin/, then PATH."""
+    places = []
+    if FROZEN:
+        places += [app_dir() / "ffmpeg" / exe_name(name), app_dir() / exe_name(name)]
+    places.append(Path(_env("MEDIA_BACKEND_DATA", _default_data_dir())).expanduser() / "bin" / exe_name(name))
+    for p in places:
+        if p.is_file():
+            return str(p)
+    return shutil.which(name) or name
+
+
+def builder_command(*args: str) -> list[str]:
+    """How to start Builder's own command line (used to plug Builder's tools into the engine)."""
+    if FROZEN:
+        return [str(app_dir() / exe_name("builder-cli")), *args]
+    return [sys.executable, "-m", "media_backend.cli", *args]
+
+
 @dataclass(frozen=True)
 class Settings:
     # One home per computer, shared by the web app, other apps and every Claude Code chat:
     # files, accounts, chats, Craft projects and the engine program (bin/).
-    data_dir: Path = field(default_factory=lambda: Path(_env("MEDIA_BACKEND_DATA", str(Path.home() / ".builder"))).expanduser().resolve())
+    data_dir: Path = field(default_factory=lambda: Path(_env("MEDIA_BACKEND_DATA", _default_data_dir())).expanduser().resolve())
     # Optional bearer token. When set, every HTTP route (including /mcp) requires it.
     api_token: str = field(default_factory=lambda: _env("MEDIA_BACKEND_TOKEN", ""))
     # Directories the MCP `import_path` / `export_file` tools may read from or write to.
@@ -39,8 +86,8 @@ class Settings:
     )
     max_upload_mb: int = field(default_factory=lambda: int(_env("MEDIA_BACKEND_MAX_UPLOAD_MB", "2048")))
     workers: int = field(default_factory=lambda: int(_env("MEDIA_BACKEND_WORKERS", "2")))
-    ffmpeg: str = field(default_factory=lambda: _env("FFMPEG_BIN", "ffmpeg"))
-    ffprobe: str = field(default_factory=lambda: _env("FFPROBE_BIN", "ffprobe"))
+    ffmpeg: str = field(default_factory=lambda: _env("FFMPEG_BIN", "") or _default_tool("ffmpeg"))
+    ffprobe: str = field(default_factory=lambda: _env("FFPROBE_BIN", "") or _default_tool("ffprobe"))
     # Built-in assistant
     assistant_name: str = field(default_factory=lambda: _env("ASSISTANT_NAME", "Rivet"))
     assistant_persona: str = field(

@@ -1,0 +1,18 @@
+# Explorer's Details tab for Builder.exe and builder-cli.exe. Keep filevers/prodvers and the two
+# version strings in step with media_backend/__init__.py (build_signed_installer.ps1 checks this).
+VSVersionInfo(
+  ffi=FixedFileInfo(filevers=(0, 2, 0, 0), prodvers=(0, 2, 0, 0), mask=0x3f, flags=0x0, OS=0x40004,
+                    fileType=0x1, subtype=0x0, date=(0, 0)),
+  kids=[
+    StringFileInfo([StringTable('040904B0', [
+      StringStruct('CompanyName', 'Cydcor LLC'),
+      StringStruct('FileDescription', 'Builder: audio/video server, Craft builds and Rivet'),
+      StringStruct('FileVersion', '0.2.0'),
+      StringStruct('InternalName', 'Builder'),
+      StringStruct('LegalCopyright', 'Cydcor LLC'),
+      StringStruct('OriginalFilename', 'Builder.exe'),
+      StringStruct('ProductName', 'Builder'),
+      StringStruct('ProductVersion', '0.2.0')])]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
