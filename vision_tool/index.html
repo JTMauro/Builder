@@ -55,7 +55,7 @@ button.b.alt{background:transparent;color:var(--accent)}
     <input id="dist" type="range" min="0.3" max="6" step="0.1" value="0.6">
     <label for="pupil">Pupil size: <b id="pupilv">4</b> mm <span class="mute">(3 bright room, 5-6 dim room)</span></label>
     <input id="pupil" type="range" min="2" max="7" step="0.5" value="4">
-    <label><input type="checkbox" id="accom"> Eye can refocus up close (young eye, about 2 D)</label>
+    <label><input type="checkbox" id="accom" checked> Eye can refocus up close (under about 40; untick to simulate presbyopia)</label>
   </div>
 
   <!-- TAB 1 -->
@@ -137,7 +137,7 @@ $('#t1').onclick=()=>tab(1); $('#t2').onclick=()=>tab(2); $('#goTab1').onclick=(
 // refocused up to the accommodation amplitude; farther (e<0) cannot. Blur disc on screen (mm) = pupil(mm) x defocus(D) x distance(m).
 // A CSS blur radius is a Gaussian sigma; a uniform disc of diameter D has sigma = D/4.
 function defocus(R){
-  const dm = +$('#dist').value, A = $('#accom').checked ? 2 : 0, e = 1/dm + R;
+  const dm = +$('#dist').value, A = $('#accom').checked ? 3 : 0, e = 1/dm + R;
   return e>0 ? Math.max(0, e-A) : -e;
 }
 function setBlur(){
