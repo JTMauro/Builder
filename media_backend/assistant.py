@@ -55,16 +55,25 @@ def build_tools() -> list[dict[str, Any]]:
     ]
     for op in ops.REGISTRY.values():
         tools.append({"name": op.name, "description": op.description, "input_schema": _schema(op.params)})
+    from . import craft_tools
+
+    tools.extend(craft_tools.TOOLS)
     return tools
 
 
 def _system_prompt() -> str:
     s = get_settings()
     return (
-        f"You are {s.assistant_name}, the built-in assistant of a media backend: {s.assistant_persona}.\n\n"
-        "You help people and other programs process audio and video. Your tools run real ffmpeg operations on files "
-        "in this server's media store. Inputs are referenced by file id and are never modified; every operation "
-        "writes new file(s) and returns their ids.\n\n"
+        f"You are {s.assistant_name}, the built-in assistant of Builder: {s.assistant_persona}.\n\n"
+        "Builder has two parts you can drive:\n"
+        "1. Craft builds (tools starting craft_): the Craft Anything engine studies a website, app or game (or starts "
+        "from nothing), a coding agent builds the person's own version in a project, then checks it against the "
+        "original (how alike, in percent) and refines it. Builds take minutes to hours: start one, report its run id "
+        "and current step, and check on it with craft_build_status when asked. You may answer the builder's "
+        "questions when the person told you what they want, but never approvals of actions: tell the person to "
+        "approve or refuse those on the build screen.\n"
+        "2. The audio/video workshop: ffmpeg operations on files in the media store. Inputs are referenced by file "
+        "id and are never modified; every operation writes new file(s) and returns their ids.\n\n"
         "How to work:\n"
         "- If you don't know which file is meant, call list_files. Call probe before choosing settings that depend on "
         "duration, resolution or whether a file has audio.\n"
@@ -184,9 +193,14 @@ class Assistant:
 
     # -------------------------------------------------------------- tools
 
-    def _execute(self, name: str, args: dict[str, Any], produced: list[storage.FileInfo]) -> tuple[Any, bool]:
+    def _execute(self, name: str, args: dict[str, Any], produced: list[storage.FileInfo], owner: str = "local") -> tuple[Any, bool]:
         """Run one tool call. Returns (tool_result content, is_error)."""
+        from . import craft, craft_tools
+
         try:
+            if name in craft_tools.NAMES:
+                result = craft_tools.call(name, args, owner)
+                return result if isinstance(result, str) else json.dumps(result, default=str), False
             if name == "list_files":
                 files = storage.list_files()[: int(args.get("limit") or 50)]
                 return json.dumps([f.model_dump(include={"id", "name", "mime_type", "size", "source"}) for f in files]), False
@@ -204,7 +218,9 @@ class Assistant:
             }), False
         except ValidationError as e:
             return f"Invalid parameters: {e}", True
-        except (ops.OpError, storage.FileNotFound, KeyError, ValueError) as e:
+        except craft.RunNotFound:
+            return "Error: no such build for this person", True
+        except (ops.OpError, storage.FileNotFound, KeyError, ValueError, PermissionError, craft.EngineMissing) as e:
             return f"Error: {e}", True
 
     def _look_at(self, file_id: str, frames: int, produced: list[storage.FileInfo]) -> list[dict[str, Any]]:
@@ -270,7 +286,7 @@ class Assistant:
 
                     results = []
                     for tu in tool_uses:
-                        content, is_error = self._execute(tu.name, dict(tu.input or {}), produced)
+                        content, is_error = self._execute(tu.name, dict(tu.input or {}), produced, sess.owner)
                         calls.append({"tool": tu.name, "input": tu.input, "ok": not is_error})
                         results.append({"type": "tool_result", "tool_use_id": tu.id, "content": content, "is_error": is_error})
                     history.append({"role": "user", "content": results})

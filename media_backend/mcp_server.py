@@ -85,7 +85,13 @@ class _Server(MCPServer):
         return super().add_tool(_friendly(fn), *args, **kwargs)
 
 
-def build_server() -> MCPServer:
+def build_server(media_only: bool | None = None) -> MCPServer:
+    """`media_only` (or MEDIA_BACKEND_MCP_MEDIA_ONLY=1) serves just the audio/video tools: the mode the
+    Craft engine loads Builder in as a plugin, so a build can't start builds or call Rivet."""
+    import os
+
+    if media_only is None:
+        media_only = os.environ.get("MEDIA_BACKEND_MCP_MEDIA_ONLY") == "1"
     mcp = _Server(name="media-backend", instructions=INSTRUCTIONS, version="0.1.0")
 
     # ---------------------------------------------------------------- files
@@ -187,6 +193,65 @@ def build_server() -> MCPServer:
 
     for op in ops.REGISTRY.values():
         register_op(op)
+
+    if media_only:
+        return mcp
+
+    # ---------------------------------------------------------------- Craft builds (engine/)
+    # Builds started over MCP belong to the "claude-code" owner (their own projects folder).
+
+    from . import craft_tools
+
+    def _craft(name: str, args: dict[str, Any]) -> Any:
+        from . import craft
+
+        try:
+            return craft_tools.call(name, {k: v for k, v in args.items() if v is not None}, "claude-code")
+        except craft.RunNotFound as e:
+            raise ToolError(f"No build {e}") from e
+        except craft.EngineMissing as e:
+            raise ToolError(str(e)) from e
+
+    @mcp.tool()
+    def craft_projects_list() -> Any:
+        """List Craft projects made through this connector, newest first."""
+        return _craft("craft_projects_list", {})
+
+    @mcp.tool()
+    def craft_build_start(request: str, target: str = "", file_id: str | None = None, rounds: int = 2) -> Any:
+        """Start a Craft build: study a target (web address, uploaded file id, or nothing), build your own
+        version with a coding agent, check it against the original and refine. Follow it with craft_build_status."""
+        return _craft("craft_build_start", {"request": request, "target": target, "file_id": file_id, "rounds": rounds})
+
+    @mcp.tool()
+    def craft_build_followup(request: str, run_id: str | None = None, project_path: str | None = None) -> Any:
+        """Ask for a change to an existing Craft project (by run id or project path)."""
+        return _craft("craft_build_followup", {"request": request, "run_id": run_id, "project_path": project_path})
+
+    @mcp.tool()
+    def craft_build_status(run_id: str) -> Any:
+        """A build's step, status, checks (how alike), preview, anything waiting, and recent activity."""
+        return _craft("craft_build_status", {"run_id": run_id})
+
+    @mcp.tool()
+    def craft_build_answer(run_id: str, choice: str | None = None, text: str | None = None) -> Any:
+        """Answer a question the builder asked. Approvals of actions are left to the person (Builder's build screen)."""
+        return _craft("craft_build_answer", {"run_id": run_id, "choice": choice, "text": text})
+
+    @mcp.tool()
+    def craft_build_stop(run_id: str) -> Any:
+        """Stop a running build."""
+        return _craft("craft_build_stop", {"run_id": run_id})
+
+    @mcp.tool()
+    def craft_engine_tools_search(query: str) -> Any:
+        """Search the Craft engine's analysis tools by words."""
+        return _craft("craft_engine_tools_search", {"query": query})
+
+    @mcp.tool()
+    def craft_engine_tool(tool: str, params: dict[str, Any] | None = None) -> Any:
+        """Run one Craft engine tool by id with JSON params (tools that run foreign code are refused)."""
+        return _craft("craft_engine_tool", {"tool": tool, "params": params or {}})
 
     # ---------------------------------------------------------------- assistant
 

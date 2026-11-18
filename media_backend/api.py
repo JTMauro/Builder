@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
 from . import __version__, ops, storage
+from . import craft
 from .assistant import AssistantNotConfigured, ChatNotFound, ChatResult, get_assistant
 from .config import get_settings
 from .jobs import Job, get_queue
@@ -50,6 +51,26 @@ class PasswordChange(BaseModel):
 
 class TokenRequest(BaseModel):
     name: str = "Claude Code"
+
+
+class BuildRequest(BaseModel):
+    request: str
+    target: str = ""  # a web address, or empty for "make something new"
+    file_id: str | None = None  # an uploaded app, game or file to study instead of a web address
+    rounds: int = 2
+    build_with: str | None = None
+
+
+class FollowUp(BaseModel):
+    request: str
+    rounds: int = 2
+
+
+class BuildAnswer(BaseModel):
+    choice: str | None = None
+    text: str | None = None
+    allow: bool | None = None
+    always: bool = False
 
 
 class ChatRequest(BaseModel):
@@ -117,6 +138,12 @@ def create_app() -> FastAPI:
     def real_user(user: User = Depends(current_user)) -> User:
         if user.id <= 0:
             raise HTTPException(400, "Sign in as a person to do that")
+        return user
+
+    def real_or_local(user: User = Depends(current_user)) -> User:
+        """Builds belong to a person (or to the single local user when sign-in is off)."""
+        if user.id < 0:
+            raise HTTPException(400, "Sign in as a person to build")
         return user
 
     def start_session(request: Request, response: Response, user: User) -> dict:
@@ -334,6 +361,79 @@ def create_app() -> FastAPI:
     def reset_session(session_id: str, user: User = Depends(current_user)):
         if not get_assistant().reset(session_id, user.username):
             raise HTTPException(404, "No such chat")
+
+    # ------------------------------------------------------------ Craft builds (engine/)
+
+    @app.exception_handler(craft.EngineMissing)
+    async def _engine_missing(_req, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=503)
+
+    @app.exception_handler(craft.RunNotFound)
+    async def _run_nf(_req, exc):
+        return JSONResponse({"detail": "No such build"}, status_code=404)
+
+    @app.get("/craft/status")
+    def craft_status():
+        try:
+            exe = craft.engine_bin()
+        except craft.EngineMissing as e:
+            return {"engine": False, "message": str(e)}
+        return {"engine": True, "program": exe.name, "version": craft.engine_version()}
+
+    @app.post("/craft/runs", response_model=craft.Run, status_code=201)
+    def start_build(body: BuildRequest, user: User = Depends(real_or_local)):
+        target = body.target.strip()
+        if body.file_id:
+            target = str(storage.path_of(body.file_id))
+        elif target and not target.startswith(("http://", "https://")):
+            raise HTTPException(422, "The target is a web address (http or https), an uploaded file, or empty for something new")
+        if not body.request.strip():
+            raise HTTPException(422, "Say what you want to make")
+        return craft.get_runs().start(user.username, target, body.request.strip(), max(0, min(body.rounds, 10)), body.build_with)
+
+    @app.get("/craft/runs", response_model=list[craft.Run])
+    def list_builds(user: User = Depends(real_or_local)):
+        return craft.get_runs().list(user.username)
+
+    @app.get("/craft/runs/{run_id}")
+    def build_events(run_id: str, after: int = Query(0, ge=0), wait: float = Query(0, ge=0, le=60), user: User = Depends(real_or_local)):
+        events, cursor, run = craft.get_runs().events(run_id, user.username, after, wait)
+        return {"run": run, "events": events, "cursor": cursor}
+
+    @app.post("/craft/runs/{run_id}/answer", response_model=craft.Run)
+    def answer_build(run_id: str, body: BuildAnswer, user: User = Depends(real_or_local)):
+        try:
+            return craft.get_runs().answer(run_id, user.username, body.model_dump(exclude_none=True))
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+
+    @app.post("/craft/runs/{run_id}/stop", response_model=craft.Run)
+    def stop_build(run_id: str, user: User = Depends(real_or_local)):
+        return craft.get_runs().stop(run_id, user.username)
+
+    @app.post("/craft/runs/{run_id}/followup", response_model=craft.Run, status_code=201)
+    def follow_up(run_id: str, body: FollowUp, user: User = Depends(real_or_local)):
+        runs = craft.get_runs()
+        prev = runs.get(run_id, user.username)
+        if not prev.project:
+            raise HTTPException(409, "That build has no project folder yet")
+        return runs.start(user.username, "-", body.request.strip(), max(0, min(body.rounds, 10)), continue_in=prev.project)
+
+    @app.get("/craft/projects")
+    def list_projects(user: User = Depends(real_or_local)):
+        return craft.list_projects(user.username)
+
+    @app.post("/craft/projects/followup", response_model=craft.Run, status_code=201)
+    def project_follow_up(body: FollowUp, path: str = Query(...), user: User = Depends(real_or_local)):
+        project = craft.get_runs().owned_project(user.username, path)
+        return craft.get_runs().start(user.username, "-", body.request.strip(), max(0, min(body.rounds, 10)), continue_in=str(project))
+
+    @app.get("/craft/projects/file")
+    def project_file(path: str, user: User = Depends(real_or_local)):
+        f = craft.get_runs().owned_project(user.username, path)
+        if not f.is_file():
+            raise HTTPException(404, "No such file")
+        return FileResponse(f)
 
     @app.get("/assistant/info")
     def assistant_info():
