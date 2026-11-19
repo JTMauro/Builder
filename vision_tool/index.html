@@ -79,6 +79,10 @@ button.b.alt{background:transparent;color:var(--accent)}
       <p class="mute">Applies text scaling, contrast and sharpening to this whole app so the simulated blur above is easier to read.</p>
       <label for="corr">Correction level: <b id="corrv">0.0</b></label>
       <input id="corr" type="range" min="0" max="5" step="0.25" value="0">
+      <div id="sysBox" hidden>
+        <label><input type="checkbox" id="sysText" checked> Whole computer: bigger text (Windows text size)</label>
+        <label><input type="checkbox" id="sysMag" checked> Whole computer: screen magnifier overlay (follows mouse and typing)</label>
+      </div>
       <div class="row" style="margin-top:.6rem">
         <button class="b alt" id="corrToggle">Compare: correction ON</button>
         <button class="b alt" id="reset">Reset</button>
@@ -196,7 +200,9 @@ function applyCorrection(){
   $('#revert').hidden = !(c>0);
   if(window.visuvius){ // desktop app: also set the system text size (debounced)
     clearTimeout(applyCorrection.t);
-    applyCorrection.t=setTimeout(()=>window.visuvius.setTextScale(on?Math.round(100*(1+c*0.08)):100),400);
+    applyCorrection.t=setTimeout(()=>window.visuvius.apply({
+      text: on && $('#sysText').checked ? Math.round(100*(1+c*0.08)) : 100,
+      zoom: on && $('#sysMag').checked ? Math.round((100+c*15)/5)*5 : 100}),400);
   }
 }
 $('#corr').oninput = applyCorrection;
@@ -336,6 +342,8 @@ $('#nearApply').onclick=()=>{
 /* ---------- revert ---------- */
 function revert(){ measuredA = null; setBlur(); $('#corr').value = 0; corrOn = true; applyCorrection(); if(window.visuvius) window.visuvius.revert(); }
 $('#revert').onclick = revert;
+if(window.visuvius) $('#sysBox').hidden = false;
+['sysText','sysMag'].forEach(i=>$('#'+i).addEventListener('change',applyCorrection));
 addEventListener('keydown', e=>{ if(e.key==='Escape') revert(); });
 // Correction lives only in this page's styles, so closing the app drops it; clear it explicitly as well.
 addEventListener('pagehide', ()=>{ root.style.removeProperty('--scale'); root.style.removeProperty('--fix'); });

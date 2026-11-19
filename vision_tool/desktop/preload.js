@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('visuvius', {
   platform: process.platform,
-  setTextScale: pct => ipcRenderer.invoke('text-scale', pct),
+  apply: opts => ipcRenderer.invoke('apply', opts),
   revert: () => ipcRenderer.invoke('revert'),
 });
