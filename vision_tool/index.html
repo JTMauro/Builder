@@ -80,8 +80,8 @@ button.b.alt{background:transparent;color:var(--accent)}
       <label for="corr">Correction level: <b id="corrv">0.0</b></label>
       <input id="corr" type="range" min="0" max="5" step="0.25" value="0">
       <div id="sysBox" hidden>
-        <label><input type="checkbox" id="sysText" checked> Whole computer: bigger text (Windows text size)</label>
-        <label><input type="checkbox" id="sysMag" checked> Whole computer: screen magnifier overlay (follows mouse and typing)</label>
+        <label><input type="checkbox" id="sysScale" checked> Whole computer: make everything bigger (Windows display scaling, no overlay)</label>
+        <label><input type="checkbox" id="sysText"> Whole computer: also increase text size</label>
       </div>
       <div class="row" style="margin-top:.6rem">
         <button class="b alt" id="corrToggle">Compare: correction ON</button>
@@ -202,7 +202,7 @@ function applyCorrection(){
     clearTimeout(applyCorrection.t);
     applyCorrection.t=setTimeout(()=>window.visuvius.apply({
       text: on && $('#sysText').checked ? Math.round(100*(1+c*0.08)) : 100,
-      zoom: on && $('#sysMag').checked ? Math.round((100+c*15)/5)*5 : 100}),400);
+      steps: on && $('#sysScale').checked ? Math.round(c*0.8) : 0}),400);
   }
 }
 $('#corr').oninput = applyCorrection;
@@ -343,7 +343,7 @@ $('#nearApply').onclick=()=>{
 function revert(){ measuredA = null; setBlur(); $('#corr').value = 0; corrOn = true; applyCorrection(); if(window.visuvius) window.visuvius.revert(); }
 $('#revert').onclick = revert;
 if(window.visuvius) $('#sysBox').hidden = false;
-['sysText','sysMag'].forEach(i=>$('#'+i).addEventListener('change',applyCorrection));
+['sysText','sysScale'].forEach(i=>$('#'+i).addEventListener('change',applyCorrection));
 addEventListener('keydown', e=>{ if(e.key==='Escape') revert(); });
 // Correction lives only in this page's styles, so closing the app drops it; clear it explicitly as well.
 addEventListener('pagehide', ()=>{ root.style.removeProperty('--scale'); root.style.removeProperty('--fix'); });
