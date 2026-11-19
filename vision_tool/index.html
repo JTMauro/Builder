@@ -121,6 +121,11 @@ button.b.alt{background:transparent;color:var(--accent)}
         <button class="b alt" id="goTab1">See in tab 1</button>
       </div>
     </div>
+    <div class="card" id="patCard">
+      <h2>Pattern check</h2>
+      <p id="patText" class="res"></p>
+      <p class="mute">Run the letter test twice: once from 3 m or more (far) and once at about 40 cm (near), with your usual glasses off or on, the same each time.</p>
+    </div>
     <p class="mute">This is a screening aid, not a medical diagnosis. Book a proper eye exam with an optometrist.</p>
   </section>
 
@@ -219,7 +224,7 @@ $('#reset').onclick = ()=>{$('#corr').value=0;$('#diop').value=0;corrOn=true;set
 
 /* ---------- eye tests ---------- */
 const MM_PER_ARCMIN_PER_M = 0.29089;               // 1 arcmin at 1 m ≈ 0.2909 mm
-const LEVELS = [1.0,0.8,0.6,0.5,0.4,0.3,0.2,0.1,0.0]; // logMAR (1.0 = 20/200 ... 0.0 = 20/20)
+const LEVELS = [1.0,0.8,0.6,0.5,0.4,0.3,0.2,0.1,0.0,-0.1,-0.2]; // logMAR (1.0 = 20/200, 0.0 = 20/20, -0.2 = 20/13)
 const pxPerMm = () => (+$('#cardw').value)/85.6;
 $('#cardw').addEventListener('input',()=>{ $('#cardRef').style.width = $('#cardw').value+'px'; store.set('cardw',+$('#cardw').value)});
 $('#dist').addEventListener('input',()=>store.set('dist',+$('#dist').value));
@@ -233,6 +238,7 @@ function eSvg(px, dir){
 }
 const sizePx = (logMAR)=> $('#dist').value*1000 * 5 * MM_PER_ARCMIN_PER_M/1000 * Math.pow(10,logMAR) * pxPerMm();
 
+const acu = {far:null, near:null, mid:null};
 let T = null; // acuity state
 function startAcuity(){
   T = {lvl:0, n:0, ok:0, best:null, cur:null};
@@ -262,8 +268,29 @@ function finishAcuity(){
   // letter stroke = 10^logMAR arcmin; 1 D of defocus with a 4 mm pupil roughly costs 0.4 logMAR
   const est = Math.min(5, +(Math.max(0,Math.pow(10,best)-1)*0.66*4/(+$('#pupil').value)).toFixed(2));
   store.set('result', {logMAR:best, est, at:new Date().toISOString()});
+  const d = +$('#dist').value;
+  if(d>=2.5) acu.far = best; else if(d<=0.6) acu.near = best; else acu.mid = best;
+  updatePattern();
   showResult(best, est);
   T = null; $('#testCard').hidden = true;
+}
+function updatePattern(){
+  const far = acu.far, near = acu.near, el = $('#patText');
+  const nearPoint = (typeof nearTouched!=='undefined' && nearTouched) ? nearCalc() : null;
+  const weakFocus = nearPoint && nearPoint.A < nearPoint.ref.min;
+  const snel = v => '20/'+Math.round(20*Math.pow(10,v));
+  if(far===null || near===null){
+    el.textContent = (far===null && near===null) ? 'No results yet.' :
+      `Only the ${far!==null?'far':'near'} test is done (${snel(far!==null?far:near)}). Do the other distance to see the pattern.`;
+    return;
+  }
+  const farGood = far<=0.1, nearWeak = near>=Math.max(0.3, far+0.2);
+  let msg;
+  if(farGood && nearWeak) msg = `Sharp at distance (${snel(far)}) but weaker up close (${snel(near)}). That is the classic arm's-length pattern: presbyopia, which is also common with long-sightedness. ${weakFocus?'Your near-point test agrees. ':''}Reading glasses are the usual fix.`;
+  else if(farGood) msg = `Sharp at both distances (far ${snel(far)}, near ${snel(near)}). No focusing issue detected by this test.`;
+  else if(near<=far-0.2) msg = `Clearer up close (${snel(near)}) than far away (${snel(far)}). That pattern fits short-sightedness.`;
+  else msg = `Blurry at both distances (far ${snel(far)}, near ${snel(near)}). That can mean short or long-sightedness, astigmatism, or an eye health problem. `;
+  el.textContent = msg + ' See an eye doctor promptly for any sudden change, flashes, floaters or pain.';
 }
 function showResult(best, est){
   const snellen = Math.round(20*Math.pow(10,best));
@@ -316,7 +343,9 @@ function nearCalc(){
   const ref = hof(age);
   return {age, np, A, ref, addBook:q25(Math.max(0,2.5-A*2/3)), addScr:q25(Math.max(0,1/dm-A*2/3)), dm};
 }
+let nearTouched = false;
 function renderNear(){
+  nearTouched = true;
   const r = nearCalc();
   $('#npv').textContent = r.np;
   $('#nearText').style.fontSize = (2.9*pxPerMm()).toFixed(1)+'px';   // about 8 pt print
@@ -332,6 +361,7 @@ function renderNear(){
   show('pvScr','','At your screen distance of '+r.dm.toFixed(1)+' m',r.dm,r.A);
   show('pvFix','','With the estimated +'+r.addBook.toFixed(2)+' D reading glasses at 40 cm',0.4,r.A+r.addBook);
   drawDecay(r);
+  updatePattern();
 }
 function drawDecay(r){
   const W=340,H=200,L=34,R=10,T=10,B=30, x=a=>L+(a-10)/(80-10)*(W-L-R), y=d=>T+(1-d/18)*(H-T-B);
