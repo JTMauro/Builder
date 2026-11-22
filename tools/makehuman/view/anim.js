@@ -38,14 +38,20 @@ const firstMappedChild = (b, M) => b.children.find(c => c.isBone && M[key(c.name
  * Retarget clips from a source Mixamo rig (src root, in its rest pose) onto the target rig (tgt root,
  * in its rest pose). Both face +Z. Returns baked clips for the target.
  */
-export function retarget(srcRoot, clips, tgtRoot, { fps = 30, inPlace = true } = {}) {
+export function retarget(srcRoot, clips, tgtRoot, { fps = 30, inPlace = true, lean = 0.06 } = {}) {
+  // a slight natural forward lean through the spine (radians at the top of the spine), head kept level
+  const LEAN = { mixamorigspine: lean / 3, mixamorigspine1: (2 * lean) / 3, mixamorigspine2: lean, mixamorigneck: lean * 0.35, mixamorighead: 0 };
+  const xAxis = new V(1, 0, 0);
   const S = boneMap(srcRoot), T = boneMap(tgtRoot);
   const names = Object.keys(T).filter(k => S[k]);
   srcRoot.updateMatrixWorld(true); tgtRoot.updateMatrixWorld(true);
   const tRest = new Map(order(tgtRoot).map(b => [b, b.quaternion.clone()]));
   // 1. bend the target into the source's rest pose by matching bone directions
+  // arms and legs differ in rest pose (MPFB rests in an A-pose, Mixamo in a T-pose); the spine, neck and
+  // head are left alone, because bending them tilts the whole posture into a swayback lean
   for (const b of order(tgtRoot)) {
     const k = key(b.name); if (!S[k]) continue;
+    if (!/shoulder|arm|hand|upleg|leg|foot|toe/.test(k)) continue;
     const c = firstMappedChild(b, T); if (!c) continue;
     const sc = S[key(c.name)];
     aim(b, c, wp(sc).sub(wp(S[k])).normalize());
@@ -68,6 +74,7 @@ export function retarget(srcRoot, clips, tgtRoot, { fps = 30, inPlace = true } =
       for (const b of tOrder) {
         const k = key(b.name);
         const W = wq(S[k]).multiply(sRef[k].clone().invert()).multiply(tRef[k]);
+        if (LEAN[k]) W.premultiply(new Q().setFromAxisAngle(xAxis, LEAN[k]));
         b.parent.updateWorldMatrix(true, false);
         b.quaternion.copy(wq(b.parent).invert().multiply(W)); b.updateWorldMatrix(false, false);
         q.get(b).push(...b.quaternion.toArray());
