@@ -44,6 +44,8 @@ human <id>". When that arrives (or the person says "check Craft Studio"):
 2. Set `status: "running"`, `step: "building"` (pin `if_version`), and add a log line.
 3. Write `params` (plus `change` notes applied by hand if present) to a JSON file and run
    `python3 -I tools/makehuman/run_job.py params.json <id>`. It prints the `.glb` and `.json` paths.
+   `smile` and `jeansLight` are handled by run_job.py. If `pose` is `"crossed"`, pose and export with
+   `tools/makehuman/view/pose.js` (see the README) and convert the posed GLB with `glb2json.py`.
 4. Render it with shadows and look at it (step `checking`). Fix colours or assets and rerun if needed.
 5. Upload the `.json` to the artifact with `Artifact` (`url`, `file_path`, `asset: true`) and write
    `modelUrl` (the `/_blob/...` url it returns), `status: "done"`, `step: "done"` and a log line.
