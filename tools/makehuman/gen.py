@@ -13,6 +13,8 @@ Settings (environment variables):
   CLOTHES   clothes asset(s), comma separated default male_casualsuit06
   SHOES     shoes asset                       default shoes05
   RIG       builtin rig: mixamo | game_engine | default   default mixamo
+  SMILE     0 neutral .. 1 broad smile with teeth          default 0
+  FRINGE    brow (lift hair that falls below the eyebrows) | keep   default brow
 Writes $S/mhgen/<OUT>.glb (and .blend). Convert for three.js with glb2json.py.
 """
 import json
@@ -65,6 +67,20 @@ for p, kind in parts:
     o = HumanService.add_mhclo_asset(A + "/" + p, body, asset_type=kind, subdiv_levels=0, material_type="MAKESKIN")
     objs[os.path.basename(p).split(".")[0]] = o
 
+
+# a smile from MakeHuman's expression units (0 = neutral, 1 = broad smile showing teeth)
+SMILE = float(E("SMILE", "0"))
+if SMILE > 0:
+    import bl_ext.user_default.mpfb as _mpfb
+    from bl_ext.user_default.mpfb.services import TargetService
+    U = os.path.join(os.path.dirname(_mpfb.__file__), "data", "targets", "expression", "units", "caucasian")
+    for unit, w in [("mouth-corner-puller", 0.95), ("mouth-upward-retraction", 0.35), ("mouth-open", 0.18),
+                    ("mouth-parling", 0.25), ("eye-left-slit", 0.18), ("eye-right-slit", 0.18)]:
+        f = os.path.join(U, unit + ".target.gz")
+        if os.path.exists(f):
+            TargetService.load_target(body, f, weight=w * SMILE, name="smile-" + unit)
+    if os.path.exists(A + "/teeth/teeth_shape01/teeth_shape01.mhclo"):
+        objs["teeth"] = HumanService.add_mhclo_asset(A + "/teeth/teeth_shape01/teeth_shape01.mhclo", body, asset_type="Teeth", subdiv_levels=0, material_type="MAKESKIN")
 
 # MPFB's node materials don't export to glTF: replace each with a plain Principled BSDF + image textures
 def mat(name, img, alpha=False, rough=0.6, normal=None):
@@ -125,6 +141,24 @@ objs[HAIR].data.materials[0].use_backface_culling = True
 for c in CLOTHES:
     setmat(objs[c], mat("Clothes_" + c, "clothes.jpg", False, 0.9, "clothes_n.jpg"))
 setmat(objs[SHOES], mat("Shoes", "shoes.jpg", False, 0.6))
+if "teeth" in objs:
+    tm = bpy.data.materials.new("Teeth"); tm.use_nodes = True
+    tb = tm.node_tree.nodes["Principled BSDF"]; tb.inputs["Base Color"].default_value = (0.86, 0.83, 0.76, 1); tb.inputs["Roughness"].default_value = 0.3
+    setmat(objs["teeth"], tm)
+
+# keep the eyes clear: lift any fringe that falls below the eyebrows (MakeHuman faces -Y in Blender)
+if E("FRINGE", "brow") == "brow":
+    eye = objs["high-poly"]
+    ez = [(eye.matrix_world @ v.co) for v in eye.data.vertices]
+    brow_z = max(p.z for p in ez) + 0.012
+    eye_front = min(p.y for p in ez)
+    hair = objs[HAIR]
+    inv = hair.matrix_world.inverted()
+    for v in hair.data.vertices:
+        w = hair.matrix_world @ v.co
+        if w.z < brow_z and w.z > brow_z - 0.09 and w.y < eye_front + 0.035:
+            w.z = brow_z - (brow_z - w.z) * 0.22
+            v.co = inv @ w
 
 # scalp: skin covered by the hair (a ray along the normal hits the hair) -> UV triangles for paint.py
 dg = bpy.context.evaluated_depsgraph_get()

@@ -72,3 +72,19 @@ python3 -I tools/makehuman/run_job.py params.json teen   # -> ~/.builder/makehum
 - Dark hair texels showed as black patches: `tex.py` lifts them.
 - In three.js, measure a rigged model with `SkinnedMesh.computeBoundingBox()`;
   `Box3.setFromObject` gives the wrong height for MPFB's rig.
+
+## Smile, fringe, lighter jeans and poses
+
+- `SMILE=0.85` (or `"smile"` in params) blends MakeHuman's expression units (mouth corner puller,
+  slight open mouth, cheek squint) and adds teeth, for a natural smile.
+- By default (`FRINGE=brow`) hair that falls below the eyebrows is lifted so both eyes show.
+- `JEANS_LIGHT=1.3` (`"jeansLight"`) gives the casual suits a lighter, faded wash.
+- Poses: `view/pose.html` + `view/pose.js` aim the arm bones at target directions in three.js and
+  export a posed GLB (still rigged). Serve the work folder (`python3 -m http.server 8775` in
+  `~/.builder/makehuman`, with `view/` copied there), then:
+
+```bash
+node tools/makehuman/view/pose.js /mhgen/teen.glb shots front,three '{}' teen_posed.glb   # '{}' = arms crossed
+node tools/makehuman/view/shot.js /mhgen/teen.glb shots front,three,face,back             # check renders
+```
+

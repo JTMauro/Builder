@@ -1,0 +1,43 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#e9ebec}</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script></head><body>
+<script type="module">
+import * as THREE from "three"; import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"; import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+const V = THREE.Vector3;
+const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); r.setSize(innerWidth, innerHeight);
+r.toneMapping = THREE.ACESFilmicToneMapping; r.outputColorSpace = THREE.SRGBColorSpace; r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap; document.body.appendChild(r.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xe9ebec);
+scene.add(new THREE.HemisphereLight(0xe6eeff, 0x6f665c, 1.0));
+const key = new THREE.DirectionalLight(0xfff1e0, 2.6); key.position.set(1.6, 3.0, 1.8); key.castShadow = true;
+Object.assign(key.shadow.camera, { left: -1.1, right: 1.1, top: 2.2, bottom: -0.3, near: 0.5, far: 9 }); key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0004; key.shadow.normalBias = 0.02; scene.add(key);
+const rim = new THREE.DirectionalLight(0xcfdcff, 0.9); rim.position.set(-1, 2.2, -2.5); scene.add(rim);
+const floor = new THREE.Mesh(new THREE.CircleGeometry(6, 64), new THREE.MeshStandardMaterial({ color: 0xd5d9dc, roughness: 1 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+const cam = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.05, 50);
+const g = await new GLTFLoader().loadAsync(new URLSearchParams(location.search).get("m"));
+const root = g.scene; scene.add(root);
+root.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; if (/brow|lash|hair/i.test(o.material?.name || "")) { o.material.alphaTest = 0.2; o.material.transparent = false; if (/hair/i.test(o.material.name)) { o.material.side = THREE.FrontSide; o.receiveShadow = false; } } } });
+const bone = n => { let b = null; root.traverse(o => { if (o.isBone && o.name.replace(/[:_]/g, "").toLowerCase() === ("mixamorig" + n).toLowerCase()) b = o; }); return b; };
+const rest = new Map(); root.traverse(o => { if (o.isBone) rest.set(o, o.quaternion.clone()); });
+function aim(name, child, dir) {
+  root.updateMatrixWorld(true);
+  const b = bone(name), c = bone(child);
+  const cur = c.getWorldPosition(new V()).sub(b.getWorldPosition(new V())).normalize();
+  const q = new THREE.Quaternion().setFromUnitVectors(cur, dir.clone().normalize());
+  const wq = b.getWorldQuaternion(new THREE.Quaternion()), pq = b.parent.getWorldQuaternion(new THREE.Quaternion());
+  b.quaternion.copy(pq.invert().multiply(q.multiply(wq))); root.updateMatrixWorld(true);
+}
+// figure faces +Z; his left is +X
+window.__pose = (A = {}) => {
+  rest.forEach((q, b) => b.quaternion.copy(q)); root.updateMatrixWorld(true);
+  aim("LeftArm", "LeftForeArm", new V(...(A.lu || [0.13, -0.86, 0.5])));
+  aim("LeftForeArm", "LeftHand", new V(...(A.lf || [-0.92, 0.12, 0.38])));
+  aim("LeftHand", "LeftHandMiddle1", new V(...(A.lh || [-0.55, -0.1, -0.83])));
+  aim("RightArm", "RightForeArm", new V(...(A.ru || [-0.13, -0.84, 0.53])));
+  aim("RightForeArm", "RightHand", new V(...(A.rf || [0.92, 0.17, 0.36])));
+  aim("RightHand", "RightHandMiddle1", new V(...(A.rh || [0.5, -0.05, -0.86])));
+};
+const box = new THREE.Box3(); root.updateMatrixWorld(true); root.traverse(o => { if (o.isSkinnedMesh) { o.computeBoundingBox(); box.union(o.boundingBox.clone().applyMatrix4(o.matrixWorld)); } });
+root.position.y -= box.min.y; const H = box.max.y - box.min.y;
+window.__view = v => { const P = { front: [[0, H * .6, H * 2.9], [0, H * .52, 0]], three: [[H * 1.5, H * .65, H * 2.5], [0, H * .52, 0]], side: [[H * 2.9, H * .6, 0.01], [0, H * .52, 0]], back: [[0, H * .6, -H * 2.9], [0, H * .52, 0]], chest: [[H * .35, H * .72, H * 1.1], [0, H * .66, 0]], face: [[H * .12, H * .93, H * .42], [0, H * .91, 0]] }[v]; cam.position.set(...P[0]); cam.lookAt(...P[1]); r.render(scene, cam); };
+window.__export = async () => { const ab = await new GLTFExporter().parseAsync(root, { binary: true, onlyVisible: true, maxTextureSize: 2048 }); let s = ""; const u = new Uint8Array(ab); for (let i = 0; i < u.length; i += 32768) s += String.fromCharCode.apply(null, u.subarray(i, i + 32768)); return btoa(s); };
+window.__ready = { H: +H.toFixed(3), bones: ["LeftArm", "LeftForeArm", "LeftHand", "LeftHandMiddle1", "RightArm"].map(n => !!bone(n)) };
+</script></body></html>

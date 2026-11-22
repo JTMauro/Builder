@@ -11,6 +11,7 @@ Colours come from environment variables (sRGB 0..1, comma separated):
   CLOTHES    clothes asset           default male_casualsuit06
   SHOES      shoes asset             default shoes05
   SHOES_RGB  shoe upper colour       default: the asset's own colours
+  JEANS_LIGHT  brighten the jeans (e.g. 1.3 for a light wash)   default: off
 """
 import os
 import sys
@@ -65,6 +66,10 @@ if top_rgb != "keep":
     L = np.where((sat > 0.05) | (np.abs(L - med) > 0.05), med, L)
     L = 0.65 * med + 0.35 * L          # flatten leftover print marks
     c[:top] = rgb("TOP_RGB", top_rgb)[None, None] * (L[..., None] / 0.82) ** 1.6
+if os.environ.get("JEANS_LIGHT"):
+    # lighter, faded wash for the trousers (the lower part of the casual-suit UV)
+    k = float(os.environ["JEANS_LIGHT"]); low = int(c.shape[0] * 0.43)
+    c[low:] = np.clip(c[low:] * k + 0.03 * (k - 1) * 4, 0, 1)
 save(c, f"{O}/clothes.jpg", 88)
 n = f"{A}/clothes/{CLOTHES}/{CLOTHES}_normal.png"
 if os.path.exists(n):
