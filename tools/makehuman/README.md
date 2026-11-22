@@ -54,5 +54,21 @@ Hair, clothes and shoes are asset folder names in `$S/mhassets/hair`, `.../cloth
 - MPFB materials don't export to glTF, so every material is replaced with a plain Principled BSDF.
 - Harmless export warnings: "Draco not available" and "MeshOptimizer not available".
 
-Not yet run in Builder's own container: the first run may need small path fixes (for example
-asset folder names in a newer asset pack).
+## One call from a settings file
+
+```bash
+python3 -I tools/makehuman/run_job.py params.json teen   # -> ~/.builder/makehuman/mhgen/teen.glb + teen.json
+```
+
+`params.json` uses Craft Studio's "Real human" fields: `age`, `gender`, `height`, `weight`, `muscle`,
+`skinRGB`, `hairRGB`, `topRGB` (plain tee `male_casualsuit06` only), `shoesRGB`, `hair`, `eyes`,
+`outfit`, `shoes`. A person takes about 10 seconds to build.
+
+## Also fixed in Builder's container
+
+- `bpy` has to be imported before `bmesh` and `mathutils`.
+- Hair layers render black from the inside: the hair material is single-sided
+  (`use_backface_culling`), and only `short02`'s hair normal map is used (the others have empty areas).
+- Dark hair texels showed as black patches: `tex.py` lifts them.
+- In three.js, measure a rigged model with `SkinnedMesh.computeBoundingBox()`;
+  `Box3.setFromObject` gives the wrong height for MPFB's rig.

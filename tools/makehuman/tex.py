@@ -10,6 +10,7 @@ Colours come from environment variables (sRGB 0..1, comma separated):
   HAIR       hair asset              default short02
   CLOTHES    clothes asset           default male_casualsuit06
   SHOES      shoes asset             default shoes05
+  SHOES_RGB  shoe upper colour       default: the asset's own colours
 """
 import os
 import sys
@@ -62,6 +63,7 @@ if top_rgb != "keep":
     sat = t.max(-1) - t.min(-1)
     med = np.asarray(Image.fromarray((L * 255).astype(np.uint8)).filter(ImageFilter.MedianFilter(31))).astype(np.float32) / 255
     L = np.where((sat > 0.05) | (np.abs(L - med) > 0.05), med, L)
+    L = 0.65 * med + 0.35 * L          # flatten leftover print marks
     c[:top] = rgb("TOP_RGB", top_rgb)[None, None] * (L[..., None] / 0.82) ** 1.6
 save(c, f"{O}/clothes.jpg", 88)
 n = f"{A}/clothes/{CLOTHES}/{CLOTHES}_normal.png"
@@ -71,13 +73,21 @@ if os.path.exists(n):
 # hair: keep the strand detail (luminance), set the colour
 hr = arr(f"{A}/hair/{HAIR}/{HAIR}_diffuse.png", 1024)
 L = hr[..., :3] @ np.array([0.3, 0.59, 0.11])
-hr[..., :3] = (L[..., None] / max(L[hr[..., 3] > 0.5].mean(), 1e-3)) * HAIR_RGB
+# keep strand detail but lift the darkest texels, which otherwise show as black patches
+rel = L / max(L[hr[..., 3] > 0.5].mean(), 1e-3)
+hr[..., :3] = np.clip(0.55 + 0.45 * rel, 0, 1.6)[..., None] * HAIR_RGB
 save(hr, f"{O}/hair.png")
 n = f"{A}/hair/{HAIR}/{HAIR}_normal.png"
 if os.path.exists(n):
     save(arr(n, 1024)[..., :3], f"{O}/hair_n.jpg")
 
-save(arr(first(f"{A}/clothes/{SHOES}/{SHOES}_diffuse.png"), 1024)[..., :3], f"{O}/shoes.jpg")
+sh = arr(first(f"{A}/clothes/{SHOES}/{SHOES}_diffuse.png"), 1024)[..., :3]
+if os.environ.get("SHOES_RGB"):
+    # recolour the uppers by luminance; near-white parts (soles, laces) stay as they are
+    L = sh @ np.array([0.3, 0.59, 0.11]); up = L < 0.72
+    tint = rgb("SHOES_RGB", ".45,.48,.30")[None, None] * (L / max(L[up].mean(), 1e-3))[..., None]
+    sh = np.where(up[..., None], np.clip(tint, 0, 1), sh)
+save(sh, f"{O}/shoes.jpg")
 
 # brows and lashes: darker than the hair, alpha boosted so they show in three.js
 brow = HAIR_RGB * 0.8

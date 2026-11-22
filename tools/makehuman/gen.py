@@ -20,8 +20,8 @@ import os
 import subprocess
 import sys
 
+import bpy  # noqa: I001  (bpy must come first: it provides bmesh and mathutils)
 import bmesh
-import bpy
 from mathutils.bvhtree import BVHTree
 
 S = sys.argv[-1]
@@ -118,7 +118,10 @@ bm_e.to_mesh(e.data)
 bm_e.free()
 setmat(objs["eyebrow001"], mat("Brows", "brows.png", True, 0.9))
 setmat(objs["eyelashes01"], mat("Lashes", "lashes.png", True, 0.9))
-setmat(objs[HAIR], mat("Hair", "hair.png", True, 0.8, "hair_n.jpg"))
+# only short02's normal map is clean; others have empty areas that shade black
+setmat(objs[HAIR], mat("Hair", "hair.png", True, 0.8, "hair_n.jpg" if HAIR == "short02" else None))
+# single-sided hair: the inner sides of the hair layers otherwise show as black patches
+objs[HAIR].data.materials[0].use_backface_culling = True
 for c in CLOTHES:
     setmat(objs[c], mat("Clothes_" + c, "clothes.jpg", False, 0.9, "clothes_n.jpg"))
 setmat(objs[SHOES], mat("Shoes", "shoes.jpg", False, 0.6))
