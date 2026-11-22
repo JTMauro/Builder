@@ -21,7 +21,7 @@ const mixer = new THREE.AnimationMixer(root);
 const idle = moves.find(c => c.name === "idle"); mixer.clipAction(idle).play(); mixer.setTime(0); root.updateMatrixWorld(true);
 const base = new Map(); root.traverse(o => { if (o.isBone) base.set(o, o.quaternion.clone()); });
 mixer.stopAllAction();
-const all = [...moves, ...gestures(root, base)];
+const all = [...moves, ...gestures(root, base, idle)];
 window.__clips = all.map(c => c.name + " " + c.duration.toFixed(2)); window.__ms = Math.round(performance.now() - t0);
 window.__show = (name, t, view) => {
   mixer.stopAllAction(); const c = all.find(c => c.name === name); mixer.clipAction(c).play(); mixer.setTime(t); root.updateMatrixWorld(true);
@@ -34,5 +34,6 @@ window.__show = (name, t, view) => {
   }
   r.render(scene, cam);
 };
+window.__check = () => all.filter(c => ['wave','point'].includes(c.name)).map(c => ({ name: c.name, dur: c.duration, tracks: c.tracks.length, bad: c.tracks.filter(t => t.values.length !== t.times.length * (t.name.endsWith('position') ? 3 : 4) || t.values.some(v => !isFinite(v)) || [...t.times].some((x, i, a) => i && x <= a[i - 1])).map(t => t.name + ' ' + t.times.length + '/' + t.values.length).slice(0, 5) }));
 window.__ready = true;
 </script></body></html>

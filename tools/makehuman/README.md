@@ -108,7 +108,10 @@ node tools/makehuman/view/shot.js /mhgen/teen.glb shots front,three,face,back   
   `W_target = W_source · W_source_rest⁻¹ · W_target_rest`. Hips height is scaled by the hip-height
   ratio; `inPlace` drops forward travel. Free source clips: three.js's `Xbot.glb` (MIT) has idle,
   walk, run, agree (nod), headShake, sneak_pose, sad_pose.
-- `gestures(scene, basePose)` makes point, wave, thumbs up and arms crossed by aiming arm bones
+- `gestures(scene, basePose, idleClip)` makes point, wave, thumbs up and arms crossed. Each is sampled
+  at 30 fps with eased timing and layered over the idle: only the gesturing arm(s) follow the gesture,
+  the rest of the body keeps its idle motion. The wave is palm-forward with an open hand and a wrist
+  that trails the forearm. Earlier version: by aiming arm bones
   and curling fingers toward the palm (found from the middle finger's natural bend). The wave lifts
   the shoulder so the raised arm doesn't look stretched.
 
