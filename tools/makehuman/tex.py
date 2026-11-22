@@ -65,7 +65,12 @@ if top_rgb != "keep":
     med = np.asarray(Image.fromarray((L * 255).astype(np.uint8)).filter(ImageFilter.MedianFilter(31))).astype(np.float32) / 255
     L = np.where((sat > 0.05) | (np.abs(L - med) > 0.05), med, L)
     L = 0.65 * med + 0.35 * L          # flatten leftover print marks
-    c[:top] = rgb("TOP_RGB", top_rgb)[None, None] * (L[..., None] / 0.82) ** 1.6
+    # the asset bakes heavy fold shading into the tee (it reads like ribs and abs on the chest):
+    # keep only a soft trace of it, around the tee's average brightness
+    soft = np.asarray(Image.fromarray((np.clip(L, 0, 1) * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(18))).astype(np.float32) / 255
+    m = max(float(L.mean()), 1e-3)
+    shade = 1 + 0.35 * (soft / m - 1) + 0.12 * (L / m - soft / m)
+    c[:top] = rgb("TOP_RGB", top_rgb)[None, None] * np.clip(shade, 0.7, 1.15)[..., None]
 if os.environ.get("JEANS_LIGHT"):
     # lighter, faded wash for the trousers (the lower part of the casual-suit UV)
     k = float(os.environ["JEANS_LIGHT"]); low = int(c.shape[0] * 0.43)

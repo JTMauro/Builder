@@ -83,6 +83,10 @@ if SMILE > 0:
         objs["teeth"] = HumanService.add_mhclo_asset(A + "/teeth/teeth_shape01/teeth_shape01.mhclo", body, asset_type="Teeth", subdiv_levels=0, material_type="MAKESKIN")
 
 # MPFB's node materials don't export to glTF: replace each with a plain Principled BSDF + image textures
+# clothes normal maps are strong; softer creases look more like real cotton (exported as normalTexture.scale)
+NORMAL_STRENGTH = {"Clothes_" + c: float(E("CLOTHES_NORMAL", "0.45")) for c in CLOTHES}
+
+
 def mat(name, img, alpha=False, rough=0.6, normal=None):
     m = bpy.data.materials.new(name)
     m.use_nodes = True
@@ -97,7 +101,7 @@ def mat(name, img, alpha=False, rough=0.6, normal=None):
         nx = nt.nodes.new("ShaderNodeTexImage")
         nx.image = bpy.data.images.load(T + "/" + normal)
         nx.image.colorspace_settings.name = "Non-Color"
-        nm = nt.nodes.new("ShaderNodeNormalMap")
+        nm = nt.nodes.new("ShaderNodeNormalMap"); nm.inputs["Strength"].default_value = NORMAL_STRENGTH.get(name, 1.0)
         nt.links.new(nx.outputs["Color"], nm.inputs["Color"])
         nt.links.new(nm.outputs["Normal"], b.inputs["Normal"])
     b.inputs["Roughness"].default_value = rough
@@ -141,6 +145,17 @@ objs[HAIR].data.materials[0].use_backface_culling = True
 for c in CLOTHES:
     setmat(objs[c], mat("Clothes_" + c, "clothes.jpg", False, 0.9, "clothes_n.jpg"))
 setmat(objs[SHOES], mat("Shoes", "shoes.jpg", False, 0.6))
+# the clothes meshes have deep sculpted folds that read as ribs and abs on a fitted tee: smooth them
+# (volume-preserving), placed first so it bakes into the rest shape before the armature
+CS = float(E("CLOTHES_SMOOTH", "0.7"))
+if CS > 0:
+    for c in CLOTHES:
+        o = objs[c]
+        md = o.modifiers.new("Smooth folds", "LAPLACIANSMOOTH")
+        md.lambda_factor = CS; md.iterations = 6; md.use_volume_preserve = True; md.use_normalized = True
+        while o.modifiers.find("Smooth folds") > 0:
+            bpy.context.view_layer.objects.active = o
+            bpy.ops.object.modifier_move_up(modifier="Smooth folds")
 if "teeth" in objs:
     tm = bpy.data.materials.new("Teeth"); tm.use_nodes = True
     tb = tm.node_tree.nodes["Principled BSDF"]; tb.inputs["Base Color"].default_value = (0.86, 0.83, 0.76, 1); tb.inputs["Roughness"].default_value = 0.3

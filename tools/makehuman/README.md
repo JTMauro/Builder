@@ -70,6 +70,11 @@ python3 -I tools/makehuman/run_job.py params.json teen   # -> ~/.builder/makehum
 - Hair layers render black from the inside: the hair material is single-sided
   (`use_backface_culling`), and only `short02`'s hair normal map is used (the others have empty areas).
 - Dark hair texels showed as black patches: `tex.py` lifts them.
+- The casual tee looked like ribs and abs on the chest: its baked fold shading is softened in
+  `tex.py`, the clothes normal maps are exported at 0.45 strength (`CLOTHES_NORMAL`), and the clothes
+  meshes get a volume-preserving smooth before the rig (`CLOTHES_SMOOTH`, default 0.7, 0 = off).
+- Warm studio light pushes brown hair toward ginger: for light brown use a desaturated colour
+  such as `HAIR_RGB=.40,.315,.235`.
 - In three.js, measure a rigged model with `SkinnedMesh.computeBoundingBox()`;
   `Box3.setFromObject` gives the wrong height for MPFB's rig.
 
