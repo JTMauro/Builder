@@ -38,9 +38,11 @@ const firstMappedChild = (b, M) => b.children.find(c => c.isBone && M[key(c.name
  * Retarget clips from a source Mixamo rig (src root, in its rest pose) onto the target rig (tgt root,
  * in its rest pose). Both face +Z. Returns baked clips for the target.
  */
-export function retarget(srcRoot, clips, tgtRoot, { fps = 30, inPlace = true, lean = 0.06 } = {}) {
+export function retarget(srcRoot, clips, tgtRoot, { fps = 30, inPlace = true, lean = { idle: 0.015, walk: 0.07, run: 0.33, default: 0.015 }, neck = 0, head = 0 } = {}) {
   // a slight natural forward lean through the spine (radians at the top of the spine), head kept level
-  const LEAN = { mixamorigspine: lean / 3, mixamorigspine1: (2 * lean) / 3, mixamorigspine2: lean, mixamorigneck: lean * 0.35, mixamorighead: 0 };
+  // per move: how far the spine leans forward (radians at its top). The head keeps only a third of it, so he looks ahead.
+  const leanOf = name => typeof lean === "number" ? lean : (lean[name] ?? lean.default ?? 0);
+  const leanMap = L => ({ mixamorigspine: L / 3, mixamorigspine1: (2 * L) / 3, mixamorigspine2: L, mixamorigneck: L * 0.6 + neck, mixamorighead: L * 0.33 + neck + head });
   const xAxis = new V(1, 0, 0);
   const S = boneMap(srcRoot), T = boneMap(tgtRoot);
   const names = Object.keys(T).filter(k => S[k]);
@@ -67,6 +69,7 @@ export function retarget(srcRoot, clips, tgtRoot, { fps = 30, inPlace = true, le
   for (const clip of clips) {
     const src = clip.clone();   // keep the hips track: its height gives the bounce; x/z are dropped below when inPlace
     mixer.stopAllAction(); const act = mixer.clipAction(src); act.play();
+    const LEAN = leanMap(leanOf(clip.name));
     const n = Math.max(2, Math.round(clip.duration * fps) + 1), times = [];
     const q = new Map(tOrder.map(b => [b, []])), hp = [];
     for (let i = 0; i < n; i++) {
