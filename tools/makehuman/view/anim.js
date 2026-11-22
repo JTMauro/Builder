@@ -38,7 +38,7 @@ const firstMappedChild = (b, M) => b.children.find(c => c.isBone && M[key(c.name
  * Retarget clips from a source Mixamo rig (src root, in its rest pose) onto the target rig (tgt root,
  * in its rest pose). Both face +Z. Returns baked clips for the target.
  */
-export function retarget(srcRoot, clips, tgtRoot, { fps = 30, inPlace = true, lean = { idle: 0.015, walk: 0.07, run: 0.33, default: 0.015 }, neck = 0, head = 0 } = {}) {
+export function retarget(srcRoot, clips, tgtRoot, { fps = 30, inPlace = true, lean = { idle: 0.015, walk: 0.07, run: 0.30, default: 0.015 }, neck = 0, head = 0 } = {}) {
   // a slight natural forward lean through the spine (radians at the top of the spine), head kept level
   // per move: how far the spine leans forward (radians at its top). The head keeps only a third of it, so he looks ahead.
   const leanOf = name => typeof lean === "number" ? lean : (lean[name] ?? lean.default ?? 0);

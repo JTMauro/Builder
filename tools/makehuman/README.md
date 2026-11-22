@@ -113,7 +113,7 @@ node tools/makehuman/view/shot.js /mhgen/teen.glb shots front,three,face,back   
   the shoulder so the raised arm doesn't look stretched.
 
 Posture: only arms and legs are matched to the source rest pose (bending the spine gave a swayback).
-  `retarget(..., { lean: { idle: 0.015, walk: 0.07, run: 0.33 } })` sets a per-move forward lean through
+  `retarget(..., { lean: { idle: 0.015, walk: 0.07, run: 0.30 } })` sets a per-move forward lean through
   the spine; the neck and head keep only part of it so he looks ahead.
 
 Both return ordinary `AnimationClip`s. `view/anim.html` + `view/animshot.js` render test frames.
