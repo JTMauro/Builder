@@ -88,3 +88,19 @@ node tools/makehuman/view/pose.js /mhgen/teen.glb shots front,three '{}' teen_po
 node tools/makehuman/view/shot.js /mhgen/teen.glb shots front,three,face,back             # check renders
 ```
 
+## Movement (walk, run, gestures)
+
+`view/anim.js` (three.js r160, ES module):
+
+- `retarget(srcScene, clips, tgtScene)` copies Mixamo-skeleton clips onto an MPFB `mixamo` rig in
+  world space. It first bends the target into the source's rest pose by matching bone directions
+  (MPFB rests in an A-pose with different bone rolls), then per frame sets
+  `W_target = W_source · W_source_rest⁻¹ · W_target_rest`. Hips height is scaled by the hip-height
+  ratio; `inPlace` drops forward travel. Free source clips: three.js's `Xbot.glb` (MIT) has idle,
+  walk, run, agree (nod), headShake, sneak_pose, sad_pose.
+- `gestures(scene, basePose)` makes point, wave, thumbs up and arms crossed by aiming arm bones
+  and curling fingers toward the palm (found from the middle finger's natural bend). The wave lifts
+  the shoulder so the raised arm doesn't look stretched.
+
+Both return ordinary `AnimationClip`s. `view/anim.html` + `view/animshot.js` render test frames.
+
