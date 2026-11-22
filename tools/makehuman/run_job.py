@@ -23,7 +23,7 @@ env.update({
     "AGE": str(p.get("age", 25)), "GENDER": str(p.get("gender", 1)),
     "HEIGHT": str(p.get("height", 0.5)), "WEIGHT": str(p.get("weight", 0.5)), "MUSCLE": str(p.get("muscle", 0.5)),
     "SKIN_RGB": rgb(p.get("skinRGB"), ".73,.53,.39"), "HAIR_RGB": rgb(p.get("hairRGB"), ".075,.05,.035"),
-    "TOP_RGB": rgb(p.get("topRGB"), "keep"), "SHOES_RGB": rgb(p.get("shoesRGB"), ""), "JEANS_LIGHT": str(p.get("jeansLight", "")), "SMILE": str(p.get("smile", 0)),
+    "TOP_RGB": rgb(p.get("topRGB"), "keep"), "SHOES_RGB": rgb(p.get("shoesRGB"), ""), "JEANS_LIGHT": str(p.get("jeansLight", "")), "SMILE": str(p.get("smile", 0)), "SHAPE": ",".join(f"{k}:{v}" for k, v in (p.get("shape") or {}).items()),
     "HAIR": p.get("hair") or "short02", "EYE": p.get("eyes") or "brown_eye",
     "CLOTHES": p.get("outfit") or "male_casualsuit06", "SHOES": p.get("shoes") or "shoes05",
     "BLENDER_USER_RESOURCES": S + "/bhome",

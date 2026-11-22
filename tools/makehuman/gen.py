@@ -14,6 +14,7 @@ Settings (environment variables):
   SHOES     shoes asset                       default shoes05
   RIG       builtin rig: mixamo | game_engine | default   default mixamo
   SMILE     0 neutral .. 1 broad smile with teeth          default 0
+  SHAPE     extra shape targets "group/target:weight,..." (see mpfb/data/targets), e.g. a longer neck
   FRINGE    brow (lift hair that falls below the eyebrows) | keep   default brow
 Writes $S/mhgen/<OUT>.glb (and .blend). Convert for three.js with glb2json.py.
 """
@@ -56,6 +57,20 @@ macro = {"gender": float(E("GENDER", "1")), "age": age_macro(float(E("AGE", "25"
          "cupsize": 0.5, "firmness": 0.5, "race": {"caucasian": race[0], "african": race[1], "asian": race[2]}}
 body = HumanService.create_human(macro_detail_dict=macro)
 body.name = "Body"
+# extra MakeHuman shape targets, before the rig and clothes are fitted: SHAPE="neck/measure-neck-height-incr:0.6,torso/torso-scale-depth-decr:0.3"
+if E("SHAPE"):
+    import bl_ext.user_default.mpfb as _mpfb0
+    from bl_ext.user_default.mpfb.services import TargetService as _TS
+    TD = os.path.join(os.path.dirname(_mpfb0.__file__), "data", "targets")
+    for item in E("SHAPE").split(","):
+        if ":" not in item:
+            continue
+        nm, w = item.rsplit(":", 1)
+        f = os.path.join(TD, nm.strip() + ".target.gz")
+        if os.path.exists(f):
+            _TS.load_target(body, f, weight=float(w), name=os.path.basename(nm.strip()))
+        else:
+            print("no such target:", nm)
 rig = HumanService.add_builtin_rig(body, RIG)
 rig.name = "Armature"
 
