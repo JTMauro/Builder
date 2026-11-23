@@ -778,3 +778,7 @@ from . import unreal as _unreal_ops  # noqa: E402,F401  (registers the unreal_* 
 from . import assets as _asset_ops  # noqa: E402,F401  (registers asset_search, asset_import, page_references)
 from . import voice as _voice_ops  # noqa: E402,F401  (speak, transcribe, burn_captions, lipsync, audio polish)
 from . import finish as _finishing_ops  # noqa: E402,F401  (film_look, upscale, smooth_motion)
+from . import sound_design as _sound_ops  # noqa: E402,F401  (make_music, make_ambience, footsteps, audio_check)
+from . import scene as _scene_ops  # noqa: E402,F401  (scene_video)
+from . import checks as _check_ops  # noqa: E402,F401  (visual_diff)
+from . import motion as _motion_ops  # noqa: E402,F401  (video_to_motion)

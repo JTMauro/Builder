@@ -3,7 +3,9 @@
     python3 -I run_job.py params.json OUT_NAME [WORKDIR]
 
 params.json keys (all optional): age, gender, height, weight, muscle (numbers), skinRGB, hairRGB,
-topRGB, shoesRGB ([r, g, b] sRGB 0..1), hair, eyes, outfit, shoes (asset names).
+topRGB, shoesRGB ([r, g, b] sRGB 0..1), hair, eyes, outfit, shoes (asset names),
+jeansLight, smile, shape {target: weight}, morphs ("talk" = mouth shapes, blinks, smile, brows as
+morph targets), hairSnug (0..1, pulls standing-off hair onto the scalp).
 Writes WORKDIR/mhgen/OUT_NAME.glb and OUT_NAME.json (one-file glTF) and prints their paths.
 """
 import json
@@ -26,6 +28,7 @@ env.update({
     "TOP_RGB": rgb(p.get("topRGB"), "keep"), "SHOES_RGB": rgb(p.get("shoesRGB"), ""), "JEANS_LIGHT": str(p.get("jeansLight", "")), "SMILE": str(p.get("smile", 0)), "SHAPE": ",".join(f"{k}:{v}" for k, v in (p.get("shape") or {}).items()),
     "HAIR": p.get("hair") or "short02", "EYE": p.get("eyes") or "brown_eye",
     "CLOTHES": p.get("outfit") or "male_casualsuit06", "SHOES": p.get("shoes") or "shoes05",
+    "MORPHS": str(p.get("morphs", "")), "HAIR_SNUG": str(p.get("hairSnug", 0)),
     "BLENDER_USER_RESOURCES": S + "/bhome",
 })
 def run(cmd):
@@ -38,6 +41,8 @@ def run(cmd):
 run(["python3", "-I", HERE + "/tex.py", S + "/mhassets", S + "/mhtex"])
 run([S + "/mhenv/bin/python", "-I", HERE + "/gen.py", S])
 glb = f"{S}/mhgen/{out}.glb"
+if p.get("morphs") == "talk":   # merge the expression variants into the GLB as morph targets
+    run(["python3", "-I", HERE + "/morphs.py", glb, f"{S}/mhgen/{out}__variants.json", glb])
 run(["python3", "-I", HERE + "/glb2json.py", glb, f"{S}/mhgen/{out}.json"])
 print(glb)
 print(f"{S}/mhgen/{out}.json")

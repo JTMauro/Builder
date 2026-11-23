@@ -17,6 +17,7 @@ dependencies = [
 dev = ["pytest>=8"]
 # Free local voices (Kokoro), captions (Whisper) and lip-sync: pip install "builder[voice]"
 voice = ["kokoro-onnx>=0.4", "faster-whisper>=1.1", "numpy>=1.26"]
+motion = ["mediapipe>=0.10", "numpy>=1.26"]
 
 [project.scripts]
 media-backend = "media_backend.cli:main"

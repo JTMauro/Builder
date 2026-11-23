@@ -16,6 +16,7 @@ Settings (environment variables):
   SMILE     0 neutral .. 1 broad smile with teeth          default 0
   SHAPE     extra shape targets "group/target:weight,..." (see mpfb/data/targets), e.g. a longer neck
   FRINGE    brow (lift hair that falls below the eyebrows) | keep   default brow
+  HAIR_SNUG 0..1: pull hair that stands off the head in towards the scalp (0 = as fitted, default 0)
   MORPHS    talk: also export expression variants (speech mouth shapes, blinks, smile, brows) for morphs.py
 Writes $S/mhgen/<OUT>.glb (and .blend). Convert for three.js with glb2json.py.
 """
@@ -194,6 +195,25 @@ if E("FRINGE", "brow") == "brow":
             w.z = brow_z - (brow_z - w.z) * 0.22
             v.co = inv @ w
 
+# snug hair: hair standing off the head (a helmet look in close-ups) is pulled towards the scalp,
+# keeping a few millimetres of thickness; SNUG=1 hugs the head, 0.5 halves the gap
+SNUG = float(E("HAIR_SNUG", "0") or 0)
+if SNUG > 0:
+    dg0 = bpy.context.evaluated_depsgraph_get()
+    bev = body.evaluated_get(dg0); bmesh0 = bev.to_mesh()
+    bbvh = BVHTree.FromPolygons([bev.matrix_world @ v.co for v in bmesh0.vertices], [p.vertices[:] for p in bmesh0.polygons])
+    bev.to_mesh_clear()
+    hair = objs[HAIR]; inv = hair.matrix_world.inverted(); moved = 0
+    for v in hair.data.vertices:
+        w = hair.matrix_world @ v.co
+        near, nrm, _, d = bbvh.find_nearest(w)
+        if near is None or d is None or d < 0.007:
+            continue
+        out = (w - near).normalized()
+        v.co = inv @ (near + out * (0.007 + (d - 0.007) * (1 - SNUG)))
+        moved += 1
+    print(f"snug hair: moved {moved} of {len(hair.data.vertices)} vertices")
+
 # scalp: skin covered by the hair (a ray along the normal hits the hair) -> UV triangles for paint.py
 dg = bpy.context.evaluated_depsgraph_get()
 hobj = objs[HAIR].evaluated_get(dg)
@@ -263,7 +283,9 @@ if E("MORPHS", "") == "talk":
         f = os.path.join(UD, u + ".target.gz")
         if os.path.exists(f):
             keys[u] = _TS2.load_target(body, f, weight=0.0, name="x-" + u).name
-    proxies = [o for k, o in objs.items() if k != "high-poly"]
+    # only the face's own pieces follow an expression; refitting hair or clothes would undo their fixes
+    proxies = [o for k, o in objs.items() if k.lower().startswith(("eyebrow", "eyelash", "teeth"))]
+    print("refit per expression:", [o.name for o in proxies])
     variants = {}
     for name, weights in EXPRESSIONS.items():
         for u, kname in keys.items():

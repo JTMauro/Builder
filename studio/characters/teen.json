@@ -1,0 +1,49 @@
+{
+ "age": 16,
+ "gender": 1,
+ "height": 0.62,
+ "weight": 0.32,
+ "muscle": 0.42,
+ "skinRGB": [
+  0.88,
+  0.72,
+  0.62
+ ],
+ "hairRGB": [
+  0.4,
+  0.315,
+  0.235
+ ],
+ "topRGB": [
+  0.8,
+  0.84,
+  0.82
+ ],
+ "hair": "short03",
+ "eyes": "blue_eye",
+ "outfit": "male_casualsuit06",
+ "shoes": "shoes02",
+ "shoesRGB": [
+  0.25,
+  0.28,
+  0.16
+ ],
+ "jeansLight": 1.32,
+ "smile": 0,
+ "shape": {
+  "neck/measure-neck-height-incr": 0.7,
+  "neck/neck-scale-vert-incr": 0.35,
+  "neck/measure-neck-circ-decr": 0.35,
+  "torso/torso-scale-depth-decr": 0.4,
+  "torso/measure-bust-circ-decr": 0.45,
+  "torso/torso-muscle-pectoral-decr": 0.6,
+  "torso/measure-shoulder-dist-decr": 0.25,
+  "torso/torso-vshape-decr": 0.35,
+  "torso/measure-waist-circ-decr": 0.55,
+  "torso/measure-underbust-circ-decr": 0.3,
+  "stomach/stomach-pregnant-decr": 0.4,
+  "stomach/stomach-navel-in": 0.4
+ },
+ "morphs": "talk",
+ "hairSnug": 0.95
+}

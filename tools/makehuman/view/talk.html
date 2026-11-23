@@ -24,6 +24,13 @@ button:disabled{opacity:.5;cursor:default}
 button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 kbd{font:12px var(--mono);border:1px solid var(--line);border-radius:4px;padding:0 4px;background:var(--panel)}
 .credits{font-size:12px}
+/* scene mode (Builder renders a video from this page): just the stage, filling the window */
+html.scene body{padding:0}html.scene .wrap>:not(#stage){display:none}
+html.scene #stage{position:fixed;inset:0;max-height:none;aspect-ratio:auto;border:0;border-radius:0}html.scene #now,html.scene #cap,html.scene #status{display:none}
+select{font:500 13px var(--body);padding:7px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--fg);max-width:60vw}
+#ask{flex:1 1 220px;min-width:0;font:500 14px var(--body);padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--fg)}
+.note{font-size:12px;color:var(--muted)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@600&display=swap">
 <div class="wrap">
@@ -60,6 +67,18 @@ kbd{font:12px var(--mono);border:1px solid var(--line);border-radius:4px;padding
     <button type="button" data-a="headShake" aria-pressed="false" disabled>Shake head</button>
     <button type="button" data-a="arms crossed" aria-pressed="false" disabled>Cross arms</button>
   </div>
+  <div class="row" id="chat" hidden><span class="lbl">Chat</span>
+    <label for="ask" class="sr">Say something to him</label>
+    <input id="ask" type="text" maxlength="300" placeholder="Say something to him…" autocomplete="off">
+    <button type="button" id="mic" hidden aria-pressed="false">🎤 Talk</button>
+    <button type="button" id="send">Send</button>
+    <span id="chatNote" class="note"></span>
+  </div>
+  <div class="row"><span class="lbl">More</span>
+    <label for="more" class="sr">More motion-capture moves</label>
+    <select id="more" disabled><option value="">28 more moves…</option></select>
+    <button type="button" id="moreGo" disabled>Play</button>
+  </div>
   <div class="row" id="view"><span class="lbl">View</span>
     <button type="button" data-v="body" aria-pressed="true">Full body</button>
     <button type="button" data-v="face" aria-pressed="false">Close-up</button>
@@ -84,9 +103,12 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { retarget, gestures, CMU } from "./anim.js";
 
 const $ = s => document.querySelector(s);
+// scene mode: Builder's scene_video injects window.__scene = { beats, lines, fps } and steps time itself
+const SCENE = window.__scene || null; if (SCENE) document.documentElement.classList.add("scene");
+let simT = 0; const sceneEvents = [];
 const stage = $("#stage"), status = $("#status"), nowEl = $("#now"), capEl = $("#cap");
-const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: !!window.__shot });
-r.setPixelRatio(Math.min(devicePixelRatio, 2)); r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 0.88; r.outputColorSpace = THREE.SRGBColorSpace;
+const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: !!(window.__shot || SCENE) });
+r.setPixelRatio(SCENE ? 1 : Math.min(devicePixelRatio, 2)); r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 0.88; r.outputColorSpace = THREE.SRGBColorSpace;
 r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap; stage.prepend(r.domElement);
 const scene = new THREE.Scene(); const BG = 0xdfe2e4; scene.background = new THREE.Color(BG); scene.fog = new THREE.Fog(BG, 8, 20);
 const hemi = new THREE.HemisphereLight(0xe6eeff, 0x6f665c, 0.35); scene.add(hemi);
@@ -153,9 +175,10 @@ async function loadGltfJson(url) {
 const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), tmpQ2 = new THREE.Quaternion(), headFwd = new THREE.Vector3(0, 0, 1);
 let boy, root, mixer, acts = {}, current = null, base = "idle", lines = {}, bones = {}, morphMeshes = [], stool, stoolOn = false, sitLow = 0.45, sitAt = new THREE.Vector3();
 const LOOPS = new Set(["idle", "walk", "run"]);
+const CMU_OPTS = { rename: CMU, neck: -0.08, head: -0.14 };   // CMU actors carry their heads lower than the Mixamo clips: lift a little
 try {
   const [g, bot, cmu, light, talk] = await Promise.all([loadGltfJson("models/teen.json"), loadGltfJson("clips/mixamo-clips.json"),
-    getJSON("clips/cmu-clips.json"), getJSON("models/light.json"), getJSON("sound/lines.json")]);
+    getJSON("clips/cmu-clips.json"), getJSON("models/light.json"), SCENE?.lines ? { lines: SCENE.lines } : getJSON("sound/lines.json")]);
 
   // image-based light from the studio HDRI
   const hdr = new RGBELoader().parse(b64(light.hdr).buffer);
@@ -183,7 +206,7 @@ try {
   const moves = retarget(bot.scene, bot.animations.filter(c => ["idle", "walk", "run", "agree", "headShake"].includes(c.name)), root);
   for (const [label, data] of Object.entries(cmu.glb)) {
     const cg = await parseGLB(b64(data)); const c = cg.animations[0]; c.name = label;
-    moves.push(...retarget(cg.scene, [c], root, { rename: CMU }));
+    moves.push(...retarget(cg.scene, [c], root, CMU_OPTS));
   }
   mixer = new THREE.AnimationMixer(root);
   const idle = moves.find(c => c.name === "idle"); mixer.clipAction(idle).play(); mixer.setTime(0); root.updateMatrixWorld(true);
@@ -205,6 +228,30 @@ try {
   window.__ready = true;
 } catch (e) { console.error(e); status.textContent = "Could not load: " + e.message; window.__ready = "error"; }
 
+// more CMU moves, loaded one at a time when picked (each is a small file)
+const more = $("#more"), moreGo = $("#moreGo"); let moreIndex = {};
+getJSON("clips/cmu/index.json").then(ix => {
+  moreIndex = ix;
+  for (const label of Object.keys(ix)) if (!acts[label]) { const o = document.createElement("option"); o.value = o.textContent = label; more.append(o); }
+  more.disabled = moreGo.disabled = false;
+}).catch(() => {});
+async function loadMove(label) {
+  if (acts[label]) return acts[label];
+  const d = await getJSON("clips/cmu/" + moreIndex[label]);
+  const cg = await parseGLB(b64(d.glb)); const c = cg.animations[0]; c.name = label;
+  const [clip] = retarget(cg.scene, [c], root, CMU_OPTS);
+  const a = mixer.clipAction(clip); a._name = label; a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; acts[label] = a;
+  return a;
+}
+moreGo.addEventListener("click", async () => {
+  const label = more.value; if (!label || !mixer) return;
+  moreGo.disabled = true; moreGo.textContent = "Loading…";
+  try { await loadMove(label); target = null; base = "idle"; play(label); }
+  catch (e) { status.textContent = "Could not load " + label + ": " + e.message; }
+  moreGo.disabled = false; moreGo.textContent = "Play";
+});
+window.__loadMove = loadMove;
+
 function makeStool(h) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x8a6a4c, roughness: 0.6 }), g = new THREE.Group();
   const top = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.035, 32), wood); top.position.y = h - 0.018; g.add(top);
@@ -220,7 +267,7 @@ function play(name, fade = 0.3) {
   if (current) current.fadeOut(fade);
   current = next;
   document.querySelectorAll(".bar button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.a === name)));
-  nowEl.hidden = false; nowEl.textContent = document.querySelector(`.bar [data-a="${name}"]`)?.textContent || name;
+  nowEl.hidden = false; nowEl.textContent = document.querySelector(`.bar [data-a="${name}"]`)?.textContent || name[0].toUpperCase() + name.slice(1);
 }
 document.querySelectorAll(".bar").forEach(bar => bar.addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b || !mixer) return;
@@ -250,6 +297,7 @@ function ensureAudio() {
   soundOn = true; $('[data-s="sound"]').setAttribute("aria-pressed", "true");
 }
 function say(key) {
+  if (SCENE) { const l = lines[key]; if (l) { speaking = { l, t0: simT }; browsKick = 1; } return; }
   ensureAudio(); const l = lines[key]; if (!l) return;
   if (!l.buffer) { l.loading = listener.context.decodeAudioData(b64(l.audio).buffer.slice(0)).then(b => (l.buffer = b)); }
   Promise.resolve(l.buffer || l.loading).then(buf => {
@@ -274,7 +322,7 @@ let nextBlink = 1.5, blinkT = -1, browsKick = 0, closeUp = false;
 function updateFace(dt, t) {
   for (const v of VIS) faceT["viseme_" + v] = 0;
   if (speaking) {
-    const now = listener.context.currentTime - speaking.t0, cues = speaking.l.cues;
+    const now = (SCENE ? simT : listener.context.currentTime) - speaking.t0, cues = speaking.l.cues;
     if (now > speaking.l.duration + 0.2) { speaking = null; capEl.hidden = true; }
     else {
       let k = 0; const ahead = now + 0.04; while (k + 1 < cues.length && cues[k + 1][0] <= ahead) k++;
@@ -282,10 +330,15 @@ function updateFace(dt, t) {
       const ws = capEl.children; speaking.l.words.forEach((w, i) => ws[i]?.classList.toggle("on", now >= w.s - 0.05));
     }
   }
+  if (!speaking && textMouth && textMouth.t0 !== Infinity) {
+    const now = (performance.now() - textMouth.t0) / 1000 * (textMouth.cues.length ? 1 : 0), scale = textMouth.dur / (textMouth.text.length * 62);
+    let k = 0; while (k + 1 < textMouth.cues.length && textMouth.cues[k + 1][0] * scale <= now) k++;
+    const shape = textMouth.cues[k]?.[1]; if (shape && shape !== "X" && now < textMouth.dur / 1000) faceT["viseme_" + shape] = shape === "A" ? 0.9 : 0.85;
+  }
   if (t > nextBlink && blinkT < 0) { blinkT = 0; nextBlink = t + 2 + Math.random() * 3.5 + (Math.random() < 0.15 ? -1.6 : 0); }
   let blink = 0; if (blinkT >= 0) { blinkT += dt; const p = blinkT / 0.16; blink = p < 0.45 ? p / 0.45 : Math.max(0, 1 - (p - 0.45) / 0.55); if (p >= 1) blinkT = -1; }
   faceT.blink_L = faceT.blink_R = blink;
-  faceT.smile = speaking ? 0.12 : 0.28;
+  faceT.smile = speaking || textMouth ? 0.12 : 0.28;
   browsKick = Math.max(0, browsKick - dt * 1.4); faceT.brows_up = Math.sin(Math.min(1, browsKick) * Math.PI) * 0.5;
   for (const [n, v] of Object.entries(faceT)) {
     const fast = n.startsWith("blink") ? 1 : Math.min(1, dt * (n.startsWith("viseme") ? 22 : 6));
@@ -328,7 +381,7 @@ function footsteps(dt) {
   for (const k of ["L", "R"]) {
     const f = feet[k], y = bones[k === "L" ? "LeftFoot" : "RightFoot"].getWorldPosition(tmpV).y;
     f.lo = Math.min(f.lo + dt * 0.02, y);
-    if (f.up && y < f.lo + 0.012) { f.up = false; if (moving && soundOn && steps) { const s = steps[k]; if (s.isPlaying) s.stop();
+    if (f.up && y < f.lo + 0.012) { f.up = false; if (moving && SCENE) sceneEvents.push({ t: +simT.toFixed(3), step: k, pace: current._name }); if (moving && soundOn && steps) { const s = steps[k]; if (s.isPlaying) s.stop();
       s.setBuffer(stepBufs[(Math.random() * stepBufs.length) | 0]); s.setPlaybackRate(0.92 + Math.random() * 0.16); s.setVolume(current._name === "run" ? 0.8 : 0.5); s.play(); } }
     else if (!f.up && y > f.lo + 0.04) f.up = true;
   }
@@ -357,11 +410,79 @@ function frameView() {
   const d = closeUp ? 0.85 : 4.6;
   cam.position.copy(ctl.target).addScaledVector(fw, d * 0.94).addScaledVector(side, d * (closeUp ? 0.1 : 0.42)); cam.position.y = hy + (closeUp ? 0.03 : 0.6);
 }
+// ---------- live chat: you talk or type, Claude answers in character, he says it with a matching mouth
+const GESTURES = ["wave", "point", "thumbs up", "agree", "headShake", "shrug", "laugh", "hello", "bow", "arms crossed", "dance", "jump"];
+const chatHist = []; let tts = null, textMouth = null;
+function textCues(text, ms) {   // mouth shapes from the letters, spread over the spoken time
+  const map = c => /[mbp]/.test(c) ? "A" : /[fv]/.test(c) ? "G" : /[ouw]/.test(c) ? "F" : /a/.test(c) ? "D" : /[ei]/.test(c) ? "C" : /l/.test(c) ? "H" : /[\s.,!?]/.test(c) ? "X" : "B";
+  const chars = text.toLowerCase().split(""), per = ms / 1000 / Math.max(1, chars.length);
+  const cues = []; chars.forEach((c, i) => { const v = map(c); if (!cues.length || cues[cues.length - 1][1] !== v) cues.push([+(i * per).toFixed(3), v]); });
+  return cues;
+}
+async function chatSend(text) {
+  text = text.trim(); if (!text || !mixer) return;
+  const sample = await claude.use("sample"); if (!sample) return;
+  const note = $("#chatNote"); note.textContent = "Thinking…"; $("#ask").value = "";
+  chatHist.push({ role: "user", content: text }); while (chatHist.length > 8) chatHist.shift();
+  const sys = `You are the teen in a 3D page: a friendly, upbeat 16-year-old guy in a grey tee and jeans, made by Builder from a photo using free tools (MakeHuman, Kokoro, CMU motion capture). Stay in character, keep it clean and kind, never claim to be a real person. Reply in at most two short spoken sentences. Pick one gesture that fits from: ${GESTURES.join(", ")}, or "none". Answer only JSON: {"say": "...", "gesture": "..."}.`;
+  try {
+    const conv = chatHist.map((m, i) => i === chatHist.length - 1 ? { role: "user", content: sys + "\n\nThey say: " + m.content } : m);
+    const ans = await sample.json(conv, { modelTier: "quick", cache: false });
+    const say = String(ans?.say || "").slice(0, 400); if (!say) throw new Error("no reply");
+    chatHist.push({ role: "assistant", content: JSON.stringify(ans) });
+    note.textContent = "";
+    if (GESTURES.includes(ans.gesture)) { target = null; base = "idle"; play(ans.gesture); }
+    const est = say.length * 62;   // about 16 letters a second
+    textMouth = { text: say, cues: textCues(say, est), t0: performance.now(), dur: est };
+    capEl.textContent = say; capEl.hidden = false;
+    if (tts) {
+      textMouth.t0 = Infinity;   // wait for the voice to start
+      tts.speak(say, { voice: "airy", rate: 1.05 }).then(r => { if (textMouth && r?.playedMs) textMouth.dur = r.playedMs; })
+        .catch(() => {}).finally(() => { textMouth = null; capEl.hidden = true; });
+    } else setTimeout(() => { textMouth = null; capEl.hidden = true; }, est + 400);
+  } catch (e) { note.textContent = e?.code === "rate_limited" ? "One moment, then try again." : "He didn't catch that. Try again."; chatHist.pop(); }
+}
+(async () => {
+  if (SCENE || !window.claude?.use) return;
+  const sample = await claude.use("sample"); if (!sample) return;
+  $("#chat").hidden = false;
+  $("#send").addEventListener("click", () => chatSend($("#ask").value));
+  $("#ask").addEventListener("keydown", e => { if (e.key === "Enter") chatSend($("#ask").value); });
+  tts = await claude.use("tts");
+  if (tts) tts.onState(({ state }) => { if (state === "speaking" && textMouth && textMouth.t0 === Infinity) { textMouth.t0 = performance.now(); } });
+  const dict = await claude.use("dictation");
+  if (dict) {
+    const mic = $("#mic"); mic.hidden = false; let heard = "";
+    dict.onPartial(({ text }) => { $("#ask").value = (heard + " " + text).trim(); });
+    dict.onFinal(({ text }) => { heard = (heard + " " + text).trim(); $("#ask").value = heard; });
+    dict.onState(({ state }) => { mic.setAttribute("aria-pressed", String(state === "listening")); mic.textContent = state === "listening" ? "■ Stop" : "🎤 Talk";
+      if (state === "idle" && heard) { const t = heard; heard = ""; chatSend(t); } });
+    mic.addEventListener("click", () => { if (mic.getAttribute("aria-pressed") === "true") dict.stop(); else { heard = ""; dict.start().catch(e => { if (e?.code === "not_granted") mic.hidden = true; }); } });
+  }
+})();
+
 window.__frame = frameView;  window.__say = say; window.__play = play;
 
+// scene beats: { t, say, move, view: "body"|"face", walkTo: [x, z], run, face: degrees }
+function runBeats() {
+  for (const b of SCENE.beats || []) {
+    if (b.done || simT + 1e-6 < b.t) continue; b.done = true;
+    if (b.view) { closeUp = b.view === "face"; frameView(); }
+    if (b.face !== undefined) boy.rotation.y = b.face * Math.PI / 180;
+    if (b.walkTo) { target = new THREE.Vector3(b.walkTo[0], 0, b.walkTo[1]); base = b.run ? "run" : "walk"; play(base); }
+    if (b.move) { if (LOOPS.has(b.move)) base = b.move; else base = "idle"; target = null; play(b.move); if (b.move === "sit") { stool.position.copy(sitAt).applyQuaternion(boy.quaternion).add(boy.position); stool.position.y = 0; stoolOn = true; } }
+    if (b.say) say(b.say);
+  }
+}
+window.__step = async dt => {   // scene mode: advance exactly dt seconds and draw one frame
+  if (SCENE.beats?.some(b => b.move && !acts[b.move] && moreIndex[b.move] && !b.loaded)) for (const b of SCENE.beats) if (b.move && !acts[b.move] && moreIndex[b.move]) { await loadMove(b.move); b.loaded = true; }
+  runBeats(); frame(dt, simT); simT += dt;
+};
+window.__events = () => sceneEvents;
+window.__prepare = async () => { for (const b of SCENE.beats || []) if (b.move && !acts[b.move]) { if (!Object.keys(moreIndex).length) moreIndex = await getJSON("clips/cmu/index.json"); if (moreIndex[b.move]) await loadMove(b.move); } frameView(); return Object.keys(acts); };
 const clock = new THREE.Clock();
-r.setAnimationLoop(() => {
-  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+if (!SCENE) r.setAnimationLoop(() => { const dt = Math.min(clock.getDelta(), 0.05); frame(dt, clock.elapsedTime); });
+function frame(dt, t) {
   if (mixer) {
     mixer.update(dt); root.updateMatrixWorld(true);
     bodyLife(dt, t); updateFace(dt, t); footsteps(dt);
@@ -397,5 +518,5 @@ r.setAnimationLoop(() => {
   }
   ctl.update();
   if (film) { grade.uniforms.t.value = t; composer.render(dt); } else r.render(scene, cam);
-});
+}
 </script>

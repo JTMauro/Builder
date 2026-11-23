@@ -139,3 +139,35 @@ Both return ordinary `AnimationClip`s. `view/anim.html` + `view/animshot.js` ren
   `clips/cmu-clips.json` (base64 GLBs by label) and `sound/lines.json` next to it.
 - CMU clips: `retarget(src, clips, tgt, { rename: CMU })` maps the CMU ASF bone names; each clip's
   facing is taken from its first frame, so all moves face forward.
+
+## Cycles stills (photoreal renders)
+
+`cycles.py` renders a still of a `gen.py` character with Blender Cycles on the CPU (no GPU or display):
+subsurface skin, wet eyes, alpha-clipped hair, brows and lashes, the clothes' own textures, light from a
+CC0 HDRI (default `~/.builder/dl/hdri/studio.hdr`) plus a soft key and rim light, on a curved grey studio
+backdrop. The camera is framed from the mesh bounds and the head bone. AgX view, OpenImageDenoise.
+
+```bash
+S=~/.builder/makehuman
+BLENDER_USER_RESOURCES=$S/bhome $S/mhenv/bin/python -I tools/makehuman/cycles.py \
+  $S/mhgen/teen.blend $S/shots/teen_closeup.png --shot closeup --pose relaxed --dof --percent 50
+```
+
+- Input: the `.blend` (best: shape keys work) or the `.glb`.
+- `--shot full|medium|closeup|portrait3q` (50/70/85/85 mm), `--lens`, `--angle` (degrees around the
+  person), `--dof` (focus on the eyes, `--fstop`).
+- `--pose relaxed` lowers the arms from the A-pose. `--smile 0..1` sets gen.py's smile (or loads it on a
+  `.blend` body); `--shape-key NAME=VALUE` sets a shape key or loads a MakeHuman expression unit such as
+  `mouth-open=0.4`, `eyebrows-left-up=0.8` (teeth, brows and lashes are refitted).
+- `--hdri`, `--hdri-strength`, `--hdri-rotate`, `--key W` (80, 0 = off), `--rim W` (60),
+  `--exposure` (-0.5), `--backdrop grey|white|none|shadow` (`shadow` = transparent PNG with a shadow catcher).
+- `--res 1920x1080` (or `3840x2160`, `1080x1350`), `--percent` for previews, `--samples` (64), `--no-denoise`,
+  `--view AgX|Filmic|Standard`, `--look "Medium High Contrast"`, `--skin-even` (0.35: hides the pale
+  patches in MakeHuman's skin texture), `--save-blend` to keep the lit scene.
+
+Times on 4 CPU cores, 64 samples: 960x540 (`--percent 50`) full shot 45 s, closeup 95 s (subsurface skin
+filling the frame is the slow part); a full shot at 1920x1080 took 6 minutes, and 3840x2160 is about 4x
+that again. Previews at `--percent 25 --samples 16` take 10-20 s.
+
+Known limits: the hair is a smooth card mesh (reads as a neat helmet up close), the tee is boxy, and the
+skin texture is low on pore detail (a fine noise bump stands in).

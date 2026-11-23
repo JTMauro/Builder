@@ -158,7 +158,38 @@ def _doctor() -> int:
     users = get_store().count()
     _ok(users > 0 or not s.auth_enabled, f"accounts: {users}" + ("" if users else " (the web app asks for the first one)"))
     print(f"  · sign-in: {'on' if s.auth_enabled else 'off'} · Claude Code identity (BUILDER_USER): {os.environ.get('BUILDER_USER', 'claude-code')}")
+    print("Studio extras (optional):")
+    for flag, text in _studio_checks(s.data_dir):
+        print(f"  {'✓' if flag else '·'} {text}")
     return 0 if good else 1
+
+
+def _studio_checks(data_dir: Path) -> list[tuple[bool, str]]:
+    """Optional tools for people, voices and film. Missing ones never fail `doctor`; each line says how to add it."""
+    import importlib.util
+
+    from . import finish, unreal, voice
+
+    has = lambda mod: importlib.util.find_spec(mod) is not None  # noqa: E731
+    models = voice.models_dir()
+    mh = Path(os.environ.get("BUILDER_MAKEHUMAN_DIR") or (data_dir / "makehuman")).expanduser()
+    mh_py = mh / "mhenv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    out = [
+        (has("kokoro_onnx") and (models / "kokoro" / "model.onnx").exists(),
+         "voices (Kokoro): " + ("ready" if (models / "kokoro" / "model.onnx").exists() else "model downloads on first `speak`; needs pip install 'media-backend[voice]'")),
+        (has("faster_whisper"), "captions + lip-sync (Whisper): " + ("ready" if has("faster_whisper") else "pip install 'media-backend[voice]'")),
+        (has("phonemizer"), "lip-sync phonemes (espeak): " + ("ready" if has("phonemizer") else "pip install phonemizer espeakng_loader")),
+        (mh_py.exists() and (mh / "bhome").exists(), "realistic people (Blender + MakeHuman): " + (str(mh) if mh_py.exists() else "run tools/setup_studio.sh (about 2 GB)")),
+        (bool(shutil.which("node")), "scene videos (Node + Playwright): " + ("node found" if shutil.which("node") else "install Node.js, then npm i -g playwright && npx playwright install chromium")),
+        (bool(finish._tool("REALESRGAN_BIN", ["realesrgan-ncnn-vulkan", "realesrgan-ncnn-vulkan.exe"])), "AI upscaling (Real-ESRGAN): set REALESRGAN_BIN or put it on PATH (needs a GPU)"),
+        (bool(finish._tool("RIFE_BIN", ["rife-ncnn-vulkan", "rife-ncnn-vulkan.exe"])), "smooth motion (RIFE): set RIFE_BIN or put it on PATH (needs a GPU)"),
+    ]
+    try:
+        st = unreal.status()
+        out.append((bool(st.get("editor")), f"Unreal Engine: {st.get('editor') or 'not found (set UNREAL_EDITOR)'}"))
+    except Exception as e:  # never let an optional check break doctor
+        out.append((False, f"Unreal Engine: check failed ({e})"))
+    return out
 
 
 def _token(args) -> int:

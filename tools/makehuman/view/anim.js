@@ -241,3 +241,79 @@ export function gestures(root, basePose, idleClip) {
   reset();
   return out;
 }
+
+/**
+ * Motion from video: a Builder `video_to_motion` result (MediaPipe world landmarks) to a clip for a
+ * Mixamo-style rig in its rest pose (facing +Z). Hips and chest turn to match the hip and shoulder lines,
+ * limbs are aimed bone by bone, the head follows the ears and nose, and the hips are lowered so the
+ * lowest foot stays on the floor. Face scores (doc.morphs) become morph-target tracks when the meshes
+ * have those morphs. Returns a THREE.AnimationClip.
+ */
+export function fromLandmarks(doc, root, { name = "video", meshes = [] } = {}) {
+  const M = boneMap(root), B = n => M[key("mixamorig" + n)];
+  const bones = order(root), rest = new Map(bones.map(b => [b, b.quaternion.clone()])), restPos = new Map(bones.map(b => [b, b.position.clone()]));
+  root.updateMatrixWorld(true);
+  const restW = new Map(bones.map(b => [b, wq(b)]));
+  const P = i => f => new V(f[i][0], -f[i][1], -f[i][2]);   // MediaPipe (x left-of-person, y down, z away) -> three (y up, z toward camera)
+  const L = Object.fromEntries(doc.points.map((n, i) => [n, P(i)]));
+  const mid = (a, b) => a.clone().add(b).multiplyScalar(0.5);
+  const frameQ = (xDir, upDir) => {   // rotation taking the rest axes (x = left, y = up) to these directions
+    const x = xDir.clone().normalize(), z = new V().crossVectors(x, upDir).normalize(), y = new V().crossVectors(z, x);
+    return new Q().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+  };
+  const setWorld = (b, q) => { b.quaternion.copy(wq(b.parent).invert().multiply(q)); b.updateWorldMatrix(false, true); };
+  const hips = B("Hips"), legLen = wp(B("LeftUpLeg")).distanceTo(wp(B("LeftLeg"))) + wp(B("LeftLeg")).distanceTo(wp(B("LeftFoot")));
+  const footY0 = Math.min(wp(B("LeftFoot")).y, wp(B("RightFoot")).y), hipY0 = wp(hips).y;
+  const fps = doc.fps, frames = doc.body || [], times = frames.map((_, i) => i / fps);
+  const qv = new Map(bones.map(b => [b, []])), hv = [];
+  const limbs = [["LeftArm", "LeftForeArm", "left_shoulder", "left_elbow"], ["LeftForeArm", "LeftHand", "left_elbow", "left_wrist"],
+    ["RightArm", "RightForeArm", "right_shoulder", "right_elbow"], ["RightForeArm", "RightHand", "right_elbow", "right_wrist"],
+    ["LeftUpLeg", "LeftLeg", "left_hip", "left_knee"], ["LeftLeg", "LeftFoot", "left_knee", "left_ankle"],
+    ["RightUpLeg", "RightLeg", "right_hip", "right_knee"], ["RightLeg", "RightFoot", "right_knee", "right_ankle"],
+    ["LeftFoot", "LeftToeBase", "left_heel", "left_foot_index"], ["RightFoot", "RightToeBase", "right_heel", "right_foot_index"],
+    ["LeftHand", "LeftHandMiddle1", "left_wrist", "left_index"], ["RightHand", "RightHandMiddle1", "right_wrist", "right_index"]];
+  let srcLeg = 0;
+  for (const f of frames) {
+    for (const b of bones) { b.quaternion.copy(rest.get(b)); b.position.copy(restPos.get(b)); }
+    root.updateMatrixWorld(true);
+    const lh = L.left_hip(f), rh = L.right_hip(f), ls = L.left_shoulder(f), rs = L.right_shoulder(f), hm = mid(lh, rh), sm = mid(ls, rs);
+    const qh = frameQ(lh.clone().sub(rh), sm.clone().sub(hm)), qs = frameQ(ls.clone().sub(rs), sm.clone().sub(hm));
+    setWorld(hips, qh.clone().multiply(restW.get(hips)));
+    const sp = [B("Spine"), B("Spine1"), B("Spine2")];
+    sp.forEach((b, i) => b && setWorld(b, qh.clone().slerp(qs, (i + 1) / 3).multiply(restW.get(b))));
+    const le = L.left_ear(f), re = L.right_ear(f), nose = L.nose(f), em = mid(le, re);
+    const fwd = nose.clone().sub(em), side = le.clone().sub(re), up = new V().crossVectors(fwd, side).normalize();
+    const qHead = frameQ(side, up.dot(sm.clone().sub(hm)) < 0 ? up.negate() : up);
+    if (B("Neck")) setWorld(B("Neck"), qs.clone().slerp(qHead, 0.4).multiply(restW.get(B("Neck"))));
+    if (B("Head")) setWorld(B("Head"), qHead.clone().multiply(restW.get(B("Head"))));
+    for (const [bn, cn, a, b] of limbs) { const bb = B(bn), cc = B(cn); if (bb && cc) aim(bb, cc, L[b](f).sub(L[a](f))); }
+    // keep the lowest foot on the floor: hips height from the source leg, scaled to this rig
+    const footLow = Math.min(L.left_heel(f).y, L.right_heel(f).y, L.left_foot_index(f).y, L.right_foot_index(f).y);
+    srcLeg = Math.max(srcLeg, lh.distanceTo(L.left_knee(f)) + L.left_knee(f).distanceTo(L.left_ankle(f)));
+    const hipH = (hm.y - footLow) * (legLen / Math.max(srcLeg, 1e-3));
+    const want = new V(wp(hips).x, footY0 + hipH + (hipY0 - footY0 - legLen) * 0.6, wp(hips).z);
+    hips.position.copy(hips.parent.worldToLocal(want)); hips.updateWorldMatrix(false, true);
+    for (const b of bones) qv.get(b).push(...b.quaternion.toArray());
+    hv.push(...hips.position.toArray());
+  }
+  for (const b of bones) { b.quaternion.copy(rest.get(b)); b.position.copy(restPos.get(b)); }
+  const tracks = [];
+  if (frames.length) {
+    for (const b of bones) tracks.push(new THREE.QuaternionKeyframeTrack(b.name + ".quaternion", times, qv.get(b)));
+    tracks.push(new THREE.VectorKeyframeTrack(hips.name + ".position", times, hv));
+  }
+  // face: one track per morph the meshes have
+  const morphs = doc.morphs || [];
+  if (morphs.length) {
+    const mt = morphs.map((_, i) => i / fps);
+    for (const mesh of meshes) {
+      const dict = mesh.morphTargetDictionary || {};
+      for (const n of Object.keys(dict)) {
+        if (!morphs.some(m => m && n in m)) continue;
+        let last = 0; const vals = morphs.map(m => (last = m && n in m ? m[n] : last));
+        tracks.push(new THREE.NumberKeyframeTrack(`${mesh.uuid}.morphTargetInfluences[${n}]`, mt, vals));
+      }
+    }
+  }
+  return new THREE.AnimationClip(name, -1, tracks);
+}

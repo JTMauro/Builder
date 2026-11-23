@@ -1,0 +1,15 @@
+{
+ "_credit": "CMU Graphics Lab Motion Capture Database, mocap.cs.cmu.edu (created with funding from NSF EIA-0196217). Free to use; GLB conversions from huggingface.co/datasets/codepawl/cmu-mocap-glb.",
+ "jump": "118_01-jump", "sit": "113_15-sit-in-chair-and-get-up", "dance": "05_02-dance-expressive-arms-pirouette",
+ "shrug": "111_25-shrug", "bow": "111_02-bow", "stretch": "141_13-stretch-and-yawn", "kick": "10_03-soccer-kick-ball",
+ "pickup": "111_17-pick-up", "hello": "141_16-wave-hello", "laugh": "13_14-laugh",
+ "explain": "18_09-conversation-explain-with-hand-gestures-walk-2-s", "sneak": "120_09-mickey-sneaking-walk",
+ "happy walk": "104_11-happygoluckwalk", "sad walk": "82_10-sad-walk-forward", "march": "138_01-marching",
+ "jog": "104_06-startjog", "dribble": "06_02-basketball-forward-dribble", "free throw": "124_04-basketball-free-throw",
+ "toss and catch": "141_10-toss-and-catch", "lift box": "115_01-pick-up-box-bend-from-waist", "punch kick": "141_14-punch-and-kick",
+ "cartwheel": "49_06-cartwheel", "drink": "13_09-drink-soda", "phone": "79_36-answering-the-phone", "sweep": "79_55-sweeping",
+ "hop": "132_23-hop-on-left-foot", "spin": "102_12-offensivemovespinleft", "limp": "77_24-limping-hurt-right-leg",
+ "yoga": "111_40-yoga", "very happy": "79_69-very-happy", "look around": "77_05-look-around-with-flashlight",
+ "sit on stool": "143_19-sit-on-stool-and-get-up", "throw": "113_24-throw", "crawl": "133_01-walk-crawl",
+ "moonwalk": "90_32-moonwalk", "charleston": "103_03-charleston-01", "waiting": "141_20-waiting", "idle 2": "140_07-idle"
+}
