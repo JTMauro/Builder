@@ -207,6 +207,7 @@ def build_timeline(p: SceneParams, voiced: bool = True) -> tuple[list[dict], lis
 def studio_scene(p: SceneParams, stage: Path, beats: list[dict], lines: list[dict], w: int, h: int, duration: float) -> tuple[dict, dict]:
     """The scene dict for the stage page (studio.html when the stage has one); fetches moves the stage lacks. Returns (scene, fetched)."""
     scene = {"width": w, "height": h, "fps": p.fps, "duration": duration, "beats": beats,
+             "frame_format": "jpg" if w * h >= 1920 * 1080 else "png",   # keep big renders within disk space
              "lines": [{k: v for k, v in ln.items() if k != "t"} for ln in lines]}
     studio = (stage / "studio.html").exists()
     if p.cast or p.set or any(b.shot or b.prop or b.on for b in p.beats):
@@ -258,7 +259,8 @@ def scene_video(p: SceneParams) -> OpResult:
             mu = run_operation("make_music", {"mood": p.music, "length_s": max(5.0, duration)}).outputs[0].id
             made.append(mu)
             tracks.append((storage.path_of(mu), 0.0, 0.22))
-        args = ["-framerate", str(p.fps), "-i", str(frames / "%06d.png")]
+        ext = "jpg" if scene.get("frame_format") == "jpg" else "png"
+        args = ["-framerate", str(p.fps), "-i", str(frames / f"%06d.{ext}")]
         for path, _, _ in tracks:
             args += ["-i", str(path)]
         fc = []
@@ -294,7 +296,7 @@ def scene_video(p: SceneParams) -> OpResult:
         if tracks:
             args += ["-map", "[aout]", *AUDIO_ENC]
         args += [*VIDEO_ENC, "-t", str(duration)]
-        n_frames = len(list(frames.glob("*.png")))
+        n_frames = len(list(frames.glob(f"*.{ext}")))
         return _guarded("scene_video", made, f"scene_{p.stage}_{w}x{h}.mp4", lambda out: _ffmpeg(*args, str(out)),
                         data={"duration_s": duration, "frames": n_frames, "lines": len(lines), "footsteps": len(steps),
                               "timeline": beats, "stage": p.stage, "fetched_moves": fetched,

@@ -14,6 +14,7 @@ try { ({ chromium } = require("playwright")); } catch { ({ chromium } = require(
 const [stage, scenePath, out] = process.argv.slice(2);
 if (!out) { console.error("usage: node scene_render.cjs STAGE_DIR scene.json OUT_DIR"); process.exit(2); }
 const scene = JSON.parse(fs.readFileSync(scenePath, "utf8"));
+const JPG = scene.frame_format === "jpg";   // big renders: ~0.6 MB a 1080p frame instead of ~3.6 MB
 const W = scene.width || 1280, H = scene.height || 720, FPS = scene.fps || 30, N = Math.round((scene.duration || 5) * FPS);
 fs.mkdirSync(out, { recursive: true });
 
@@ -41,8 +42,8 @@ const server = http.createServer((req, res) => {
   const keep = Array.isArray(scene.keep) ? new Set(scene.keep) : null;
   for (let i = 0; i < N; i++) {
     const draw = !keep || keep.has(i + 1);
-    const data = await p.evaluate(async ([dt, draw]) => { await window.__step(dt, draw); return draw ? document.querySelector("#stage canvas").toDataURL("image/png") : null; }, [1 / FPS, draw]);
-    if (data) fs.writeFileSync(path.join(out, String(i + 1).padStart(6, "0") + ".png"), Buffer.from(data.split(",")[1], "base64"));
+    const data = await p.evaluate(async ([dt, draw]) => { await window.__step(dt, draw); return draw ? document.querySelector("#stage canvas").toDataURL(JPG ? "image/jpeg" : "image/png", 0.95) : null; }, [1 / FPS, draw]);
+    if (data) fs.writeFileSync(path.join(out, String(i + 1).padStart(6, "0") + (JPG ? ".jpg" : ".png")), Buffer.from(data.split(",")[1], "base64"));
     if (i % FPS === 0) console.log(`frame ${i + 1}/${N} (${((Date.now() - t0) / 1000).toFixed(0)} s)`);
   }
   fs.writeFileSync(path.join(out, "events.json"), JSON.stringify(await p.evaluate(() => window.__events())));
