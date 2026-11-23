@@ -465,16 +465,23 @@ def strand_hair_material(rgb, melanin=None):
     out = next(n for n in nt.nodes if n.type == "OUTPUT_MATERIAL")
     h = nt.nodes.new("ShaderNodeBsdfHairPrincipled")
     h.parametrization = "MELANIN"
-    rough = 0.32
+    rough = 0.38
     mel, red = melanin if melanin else hair_melanin(rgb)
     h.inputs["Melanin"].default_value = mel
+    # clumps differ a little in tone (attribute "clump" from strand_hair), like real hair locks
+    at = nt.nodes.new("ShaderNodeAttribute"); at.attribute_name = "clump"
+    mr = nt.nodes.new("ShaderNodeMapRange")
+    mr.inputs["To Min"].default_value = max(0.0, mel - 0.07)
+    mr.inputs["To Max"].default_value = min(1.0, mel + 0.07)
+    nt.links.new(at.outputs["Fac"], mr.inputs["Value"])
+    nt.links.new(mr.outputs["Result"], h.inputs["Melanin"])
     h.inputs["Melanin Redness"].default_value = red
     h.inputs["Roughness"].default_value = rough
     h.inputs["Radial Roughness"].default_value = 0.35
     h.inputs["Coat"].default_value = 0.05
     h.inputs["IOR"].default_value = 1.55
     h.inputs["Random Color"].default_value = 0.12       # per-strand melanin variation
-    h.inputs["Random Roughness"].default_value = 0.15
+    h.inputs["Random Roughness"].default_value = 0.2
     nt.links.new(h.outputs[0], out.inputs["Surface"])
     log(f"strand hair: melanin {mel:.2f}, redness {red:.2f} (from hair colour "
         f"{', '.join(f'{c:.3f}' for c in rgb)} linear)")
@@ -604,7 +611,7 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
             want = max(0.0015, gap.length * layer * t)
             q = q + ax * ((b + ax * want - q).dot(ax)) * 0.85
             off = (q - s) - sn * (q - s).dot(sn)
-            if L > 0.01 and (off.length > 0.007 or alpha_at(fi, s) < 0.3):
+            if L > 0.01 and (off.length > 0.004 or alpha_at(fi, s) < 0.4):
                 break                    # past the card's edge, or where its texture is transparent
             dn = (q - p)
             if dn.length < 1e-6:
@@ -631,6 +638,11 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
         log("strand hair: no guide could grow, skipped")
         return None
     G, R = np.array(G), np.array(R)
+    # a gentle wave per lock (about 1.5 mm, growing toward the tip) so locks are not ruler-straight
+    S = np.linspace(0, 1, NP)
+    ph = rng.random((len(G), 1, 1)) * 6.3
+    wv = rng.normal(0, 0.0011, (len(G), 1, 3))
+    G[:, 1:] += (wv * np.sin(4.0 * S[None, :, None] + ph) * S[None, :, None])[:, 1:]
     strand_hair.guides = G                                   # for debugging / tests
     log(f"strand hair: scalp {scalp_cm2:.0f} cm2, {len(G)} guides ({time.time() - t0:.1f}s)")
 
@@ -649,7 +661,6 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
         if len(res) < 3:
             idx[i, len(res):] = idx[i, 0]
     wts /= wts.sum(1, keepdims=True)
-    S = np.linspace(0, 1, NP)
     shape = (G[idx] * wts[:, :, None, None]).sum(1)                 # (nc, NP, 3)
     base = shape[:, :1]
     clump = 0.35 + 0.3 * rng.random((nc, 1, 1))
@@ -666,14 +677,21 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
     fz = rng.normal(0, 0.0007, (nc, 3, 3))
     tt = S[None, :, None]
     shape += (fz[:, 0, None] * np.sin(3.1 * tt) + fz[:, 1, None] * np.sin(6.3 * tt + 1)) * tt
-    # stay outside the scalp and inside the card surface (no strand pokes out as a spike)
+    # stay outside the scalp and under the card surface (no strand pokes out as a spike); a strand that
+    # runs past the card's edge or into a transparent part of it is cut there
+    keep = np.ones(nc, bool)
     for i in range(nc):
+        end = NP
         for k in range(1, NP):
             q = Vector(shape[i, k])
             b, bn, _, _ = B["bvh"].find_nearest(q)
-            s, _, _, _ = C["bvh"].find_nearest(q)
+            s, sn, fi, _ = C["bvh"].find_nearest(q)
             if b is None or s is None:
                 continue
+            off = (q - s) - sn * (q - s).dot(sn)
+            if off.length > 0.004 or alpha_at(fi, s) < 0.4:
+                end = k
+                break
             ax = s - b
             if ax.length < 1e-4:
                 ax = bn
@@ -683,11 +701,19 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
             h = (q - b).dot(ax); top = max((s - b).dot(ax), 0.0015)
             if h < 0.0012:
                 q += ax * (0.0012 - h)
-            elif h > top + 0.0015:
-                q -= ax * (h - top - 0.0015)
+            elif h > top + 0.001:
+                q -= ax * (h - top - 0.001)
             else:
                 continue
             shape[i, k] = q
+        if end < NP:
+            if end < 3:
+                keep[i] = False
+                continue
+            u = np.linspace(0, end - 1, NP)
+            shape[i] = np.stack([np.interp(u, np.arange(end), shape[i, :end, c]) for c in range(3)], 1)
+    shape, clump_id = shape[keep], idx[keep, 0]
+    nc = len(shape)
     strand_hair.strands = shape
     log(f"strand hair: {nc} strands ({time.time() - t0:.1f}s)")
 
@@ -697,6 +723,8 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
     rad = cv.attributes.get("radius") or cv.attributes.new("radius", "FLOAT", "POINT")
     r = np.tile(0.000055 * (1 - 0.65 * S ** 2), nc).astype(np.float32)
     rad.data.foreach_set("value", r)
+    cl = cv.attributes.new("clump", "FLOAT", "CURVE")        # one random value per clump (guide)
+    cl.data.foreach_set("value", rng.random(len(G))[clump_id].astype(np.float32))
     cv.materials.append(strand_hair_material(rgb, melanin))
     o = bpy.data.objects.new("Hair strands", cv)
     bpy.context.scene.collection.objects.link(o)
