@@ -109,7 +109,8 @@ def fit(pts, height_hint=None):
     zmin, zmax = pts[:, 2].min(), pts[:, 2].max()
     H = zmax - zmin
     z = (pts[:, 2] - zmin) / H
-    cx = float(np.median(pts[(z > 0.35) & (z < 0.7), 0]))
+    top = pts[z > 0.9]
+    cx = float((top[:, 0].min() + top[:, 0].max()) / 2) if len(top) else float(np.median(pts[:, 0]))   # heads are symmetric
 
     def sl(f0, f1):
         return pts[(z >= f0) & (z < f1)]
@@ -135,9 +136,14 @@ def fit(pts, height_hint=None):
         w, _, _ = central_width(sl(f, f + 0.012), cx, H)
         prof.append((f, w))
     prof = np.array(prof)
-    upper = prof[(prof[:, 0] > max(0.62, crotch + 0.18)) & (prof[:, 0] < 0.93)]
-    neck = float(upper[np.argmin(np.where(upper[:, 1] > 0, upper[:, 1], 9e9)), 0]) if len(upper) else 0.84
-    neck = float(np.clip(neck, crotch + 0.22, 0.92))
+    upper = prof[(prof[:, 0] > crotch + 0.15) & (prof[:, 0] < 0.93) & (prof[:, 1] > 0)]
+    neck = float(upper[np.argmin(upper[:, 1]), 0]) if len(upper) else 0.84   # big cartoon heads: the neck is lower
+    neck = float(np.clip(neck, crotch + 0.18, 0.92))
+    # shoulders: going down from the neck, where the body first gets much wider than the neck
+    nw = float(upper[np.argmin(upper[:, 1]), 1]) if len(upper) else 0.1 * H
+    below = prof[(prof[:, 0] < neck - 0.015) & (prof[:, 0] > neck - 0.14)][::-1]
+    wide = below[below[:, 1] > 1.6 * nw]
+    shoulder_f = float(np.clip(wide[0, 0] if len(wide) else neck - 0.035, neck - 0.10, neck - 0.025))
     # torso half-width under the armpits (arms in an A/T-pose stand apart from the chest there)
     chest_z = crotch + 0.55 * (neck - crotch)
     w, l, r = central_width(sl(chest_z, chest_z + 0.02), cx, H)
@@ -160,8 +166,7 @@ def fit(pts, height_hint=None):
     P["Neck"] = (cx, ymid(neck - 0.03, neck - 0.01, lambda s: np.abs(s[:, 0] - cx) < half * 0.6), zf(neck - 0.02))
     P["Head"] = (cx, ymid(neck + 0.01, neck + 0.04, lambda s: np.abs(s[:, 0] - cx) < half * 0.6), zf(neck + 0.025))
     P["HeadTop"] = (cx, P["Head"][1], zmax)
-    shoulder_f = neck - 0.035
-    info = {"height": H, "crotch": crotch, "neck": neck, "front": "-y" if front_sign < 0 else "+y", "half_chest": half / H}
+    info = {"height": H, "crotch": crotch, "neck": neck, "shoulder": shoulder_f, "front": "-y" if front_sign < 0 else "+y", "half_chest": half / H}
     for side, sx in (("Left", 1.0), ("Right", -1.0)):   # character's left is +X when it looks toward -Y
         sx = sx * -front_sign   # facing +Y mirrors left and right
         # leg centre (x, y) at the thigh and knee
@@ -184,31 +189,40 @@ def fit(pts, height_hint=None):
         tip_y = float(ft[:, 1].min() if front_sign < 0 else ft[:, 1].max()) if len(ft) else ay + front_sign * 0.12 * H
         P[f"{side}ToeBase"] = (ax, ay + 0.6 * (tip_y - ay), zf(0.015))
         P[f"{side}ToeEnd"] = (ax, tip_y, zf(0.015))
-        # arm: fingertip = furthest point out on this side above the hips
-        up = pts[(z > crotch) & ((pts[:, 0] - cx) * sx > half * 0.9)]
-        sh = np.array([cx + sx * half * 0.85, P["Spine2"][1], zf(shoulder_f)])
-        if len(up):
-            tip = up[np.argmax((up[:, 0] - cx) * sx)]
-            if abs(tip[0] - cx) < half * 1.4:   # arms down: the lowest point of the side cluster is the hand
-                side_pts = pts[(z > crotch - 0.15) & (z < shoulder_f) & ((pts[:, 0] - cx) * sx > half * 0.8)]
-                if len(side_pts):
-                    tip = side_pts[np.argmin(side_pts[:, 2])]
-        else:
-            tip = sh + np.array([sx * 0.42 * H, 0, -0.2 * H])
-        arm = tip - sh
-        L = np.linalg.norm(arm)
-        if L < 0.25 * H or L > 0.6 * H:
-            arm = arm / max(L, 1e-9) * 0.44 * H
-            L = 0.44 * H
-        d = arm / L
+        # arm: the shoulder joint sits a little wider than the hip joint; the fingertip is the point on this
+        # side, beyond the shoulder, furthest from it (works for T-, A- and arms-down poses)
+        sh_off = float(np.clip(max(1.5 * abs(lx - cx), 0.085 * H), 0.06 * H, max(half * 0.9, 0.07 * H)))
+        sh = np.array([cx + sx * sh_off, P["Spine2"][1], zf(shoulder_f)])
+        root = pts[(z > shoulder_f - 0.2) & (z < shoulder_f + 0.03) & ((pts[:, 0] - cx) * sx > sh_off * 1.05) & ((pts[:, 0] - cx) * sx < sh_off * 1.6)]
+        if len(root) > 20:   # an arm held out sideways: the shoulder joint is level with the arm's middle
+            zr, xr = np.percentile(root[:, 2], [5, 95]), np.percentile(root[:, 0], [5, 95])
+            if (xr[1] - xr[0]) >= (zr[1] - zr[0]) * 0.8:
+                sh[2] = min(sh[2], (zr[0] + zr[1]) / 2)
+        region = pts[(z > crotch - 0.12) & (z < shoulder_f + 0.06) & ((pts[:, 0] - cx) * sx > sh_off * 1.05)]
+        dist = np.linalg.norm(region - sh, axis=1) if len(region) else np.zeros(0)
+
+        def ring(r0, r1):   # centre of the arm where a sphere round the shoulder cuts it (a thin held weapon barely moves it)
+            m = (dist > r0 * H) & (dist < r1 * H)
+            return region[m].mean(0) if m.sum() >= 8 else None
+
+        near = dist[dist < 0.55 * H]
+        R = float(np.clip(np.percentile(near, 95), 0.2 * H, 0.46 * H)) / H if len(near) > 20 else 0.44   # arm reach
+        el, wr = ring(0.36 * R, 0.5 * R), ring(0.68 * R, 0.84 * R)
+        if el is None or wr is None:
+            d0 = np.array([sx * 0.7, 0, -0.7])
+            el, wr = sh + d0 / np.linalg.norm(d0) * 0.19 * H, sh + d0 / np.linalg.norm(d0) * 0.34 * H
+        u1, u2 = (el - sh) / np.linalg.norm(el - sh), (wr - el) / np.linalg.norm(wr - el)
+        elbow = sh + u1 * 0.41 * R * H - np.array([0, front_sign * 0.01 * H, 0])   # a hint of bend
+        wrist = elbow + u2 * 0.375 * R * H
+        d = u2
         P[f"{side}Shoulder"] = (cx + sx * 0.02 * H, P["Spine2"][1], zf(shoulder_f - 0.01))
         P[f"{side}Arm"] = tuple(sh)
-        wrist = sh + d * (L - 0.1 * H)
-        elbow = sh + d * ((L - 0.1 * H) * 0.5) - np.array([0, front_sign * 0.012 * H, 0])   # a hint of bend
         P[f"{side}ForeArm"] = tuple(elbow)
         P[f"{side}Hand"] = tuple(wrist)
-        P[f"{side}HandEnd"] = tuple(sh + arm)
-        info[f"{side.lower()}_arm_down_deg"] = round(float(np.degrees(np.arcsin(np.clip(-d[2], -1, 1)))), 1)
+        P[f"{side}HandEnd"] = tuple(wrist + d * 0.2 * R * H)
+        u = (wrist - sh) / np.linalg.norm(wrist - sh)
+        info[f"{side.lower()}_arm_reach"] = round(R, 3)
+        info[f"{side.lower()}_arm_down_deg"] = round(float(np.degrees(np.arcsin(np.clip(-u[2], -1, 1)))), 1)
     return P, info, front_sign
 
 

@@ -1,10 +1,11 @@
 """One image to a 3D mesh with TripoSR (MIT, Tripo AI & Stability AI). Run by media_backend/image3d.py.
 
     python -I triposr.py IMAGE OUT.glb --code DIR --weights DIR [--mc 256] [--no-rembg] [--fg 0.85]
-                         [--max-faces N] [--device auto|cpu] [--models DIR]
+                         [--max-faces N] [--device auto|cpu] [--models DIR] [--texture 1024]
 
 --code holds TripoSR's `tsr` package, --weights its config.yaml + model.ckpt. Mesh extraction uses
-scikit-image's marching cubes (no torchmcubes build needed). Prints one JSON line with stats; exits 3 with
+scikit-image's marching cubes (no torchmcubes build needed). --texture N unwraps the mesh (xatlas) and
+bakes TripoSR's colour field into an N x N texture (bake.py) instead of vertex colours. Prints one JSON line with stats; exits 3 with
 {"missing": [...]} when a Python package is missing.
 """
 
@@ -124,11 +125,14 @@ def main() -> None:
     ap.add_argument("--fg", type=float, default=0.85)
     ap.add_argument("--max-faces", type=int, default=0)
     ap.add_argument("--device", default="auto")
+    ap.add_argument("--texture", type=int, default=0)
     a = ap.parse_args()
 
     missing = sorted({pip for mod, pip in NEEDS.items() if importlib.util.find_spec(mod) is None})
     if a.max_faces and importlib.util.find_spec("fast_simplification") is None:
         missing.append("fast-simplification")
+    if a.texture and importlib.util.find_spec("xatlas") is None:
+        missing.append("xatlas")
     if missing:
         print(json.dumps({"missing": missing}))
         sys.exit(3)
@@ -207,10 +211,28 @@ def main() -> None:
     t = time.time()
     if a.max_faces and len(mesh.faces) > a.max_faces:
         mesh = mesh.simplify_quadric_decimation(face_count=a.max_faces)
-    with torch.no_grad():   # colours at the final vertices, so decimation keeps them
-        rgb = model.renderer.query_triplane(model.decoder, torch.as_tensor(mesh.vertices, dtype=torch.float32, device=device), code)["color"]
-    rgb = (rgb.clamp(0, 1).cpu().numpy() * 255).astype(np.uint8)
-    mesh.visual = trimesh.visual.ColorVisuals(mesh, vertex_colors=np.concatenate([rgb, np.full((len(rgb), 1), 255, np.uint8)], 1))
+    extra: dict = {}
+
+    def colour(pts):   # TripoSR's colour field at points in its own space, RGB 0..1
+        outs = []
+        with torch.no_grad():
+            for i in range(0, len(pts), 200_000):
+                q = torch.as_tensor(np.asarray(pts[i:i + 200_000]), dtype=torch.float32, device=device)
+                outs.append(model.renderer.query_triplane(model.decoder, q, code)["color"].clamp(0, 1).cpu().numpy())
+        return np.concatenate(outs) if outs else np.zeros((0, 3), np.float32)
+
+    if a.texture:   # unwrap and bake the colour field into a texture (sharper than vertex colours, game-friendly)
+        import importlib.util as iu
+
+        spec = iu.spec_from_file_location("builder_bake", os.path.join(os.path.dirname(os.path.abspath(__file__)), "bake.py"))
+        bake = iu.module_from_spec(spec)
+        spec.loader.exec_module(bake)
+        v, f, uv, img, cov = bake.bake(mesh.vertices, mesh.faces, a.texture, colour_fn=colour)
+        mesh = bake.textured_mesh(v, f, uv, img)
+        extra.update({"texture": a.texture, "texture_coverage": round(cov, 3)})
+    else:   # colours at the final vertices, so decimation keeps them
+        rgb = (colour(mesh.vertices) * 255).astype(np.uint8)
+        mesh.visual = trimesh.visual.ColorVisuals(mesh, vertex_colors=np.concatenate([rgb, np.full((len(rgb), 1), 255, np.uint8)], 1))
     # TripoSR is z-up and faces +x; glTF/OBJ viewers expect y-up facing +z.
     mesh.apply_transform(trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0]))
     mesh.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0]))
@@ -219,7 +241,7 @@ def main() -> None:
     times = {k: round(v, 1) for k, v in times.items()}
     times["threads"] = torch.get_num_threads()
     print(json.dumps({"vertices": len(mesh.vertices), "faces": len(mesh.faces), "watertight": bool(mesh.is_watertight),
-                      "extent": [round(float(x), 3) for x in mesh.extents], "device": device, "total_s": round(time.time() - t0, 1), **times}))
+                      "extent": [round(float(x), 3) for x in mesh.extents], "device": device, "total_s": round(time.time() - t0, 1), **times, **extra}))
 
 
 if __name__ == "__main__":

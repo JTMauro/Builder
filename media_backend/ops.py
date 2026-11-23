@@ -791,3 +791,6 @@ from . import review as _review_ops  # noqa: E402,F401  (review_video, describe_
 from . import extras as _extra_ops  # noqa: E402,F401  (separate_stems, remove_background, clean_speech, optimize_model)
 from . import godot as _godot_ops  # noqa: E402,F401  (export_godot)
 from . import senses as _senses_ops  # noqa: E402,F401  (watch_video, caption_audio, quality_score)
+from . import audio_plus as _audio_plus_ops  # noqa: E402,F401  (who_spoke, enhance_voice, find_music, make_sfx; precise timing)
+from . import stage_tools as _stage_tool_ops, pictures as _picture_ops, shorts as _short_ops  # noqa: E402,F401  (add_set, find_sets, find_moves, fetch_moves, library_delete_scene, finish_picture, make_comic, make_video_short)
+from . import model3d as _model3d_ops  # noqa: E402,F401  (rig_model, bake_texture, stage_prop)

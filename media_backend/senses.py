@@ -38,7 +38,7 @@ from .ops import OpError, OpResult, _guarded, _src, _stem, media_info, operation
 VLM_REPO = "Qwen/Qwen3-VL-2B-Instruct"
 CLAP_REPO = "laion/larger_clap_general"
 CLIP_REPO = "openai/clip-vit-base-patch32"
-AESTHETIC_URL = "https://github.com/LAION-AI/aesthetic-predictor/raw/main/sa_0_4_vit_b_32_linear.pth"
+AESTHETIC_URL = "https://raw.githubusercontent.com/LAION-AI/aesthetic-predictor/main/sa_0_4_vit_b_32_linear.pth"
 LICENSES = {
     VLM_REPO: ("Apache-2.0", "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct"),
     CLAP_REPO: ("Apache-2.0", "https://huggingface.co/laion/larger_clap_general"),
@@ -510,7 +510,10 @@ def _lpips_model():
         import contextlib
         import io
 
-        with contextlib.redirect_stdout(io.StringIO()):
+        import warnings
+
+        with contextlib.redirect_stdout(io.StringIO()), warnings.catch_warnings():
+            warnings.simplefilter("ignore")
             m = lpips.LPIPS(net="alex", verbose=False)
         m.eval()
         return m
@@ -615,3 +618,11 @@ def status() -> dict[str, Any]:
             "vlm": (d / VLM_REPO.split("/")[-1] / ".complete").exists(),
             "clap": (d / CLAP_REPO.split("/")[-1] / ".complete").exists(),
             "clip": (d / CLIP_REPO.split("/")[-1] / ".complete").exists()}
+
+
+def lpips_files(file_id: str, reference_id: str, at: float = 0.0, max_side: int = 512) -> dict[str, Any]:
+    """LPIPS between one frame of two files, scaled to the reference's shape (used by visual_diff perceptual=true)."""
+    W, H, _, _ = _video_dims(reference_id)
+    w, h = _fit(W, H, max_side, 2)
+    d = lpips_distance(_frames(_src(file_id), [at], w, h), _frames(_src(reference_id), [at], w, h))[0]
+    return {"lpips": d, "lpips_meaning": _lpips_meaning(d)}

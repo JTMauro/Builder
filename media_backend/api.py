@@ -140,12 +140,16 @@ def create_app() -> FastAPI:
         _start_remote_from_settings()
         if watch.list_folders():
             watch.ensure_running()
+        from . import bench
+
+        bench.ensure_scheduler()  # nightly self-test; off unless BUILDER_BENCH=1
         async with mcp.session_manager.run():
             try:
                 yield
             finally:
                 remote.get_tunnel().stop()
                 watch.stop()
+                bench.stop_scheduler()
 
     app = FastAPI(
         title="Builder API", version=__version__, lifespan=lifespan,

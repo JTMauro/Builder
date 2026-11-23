@@ -292,7 +292,7 @@ function play(a, name, fade = 0.3) {
 // space, metres) and turns it (degrees); the left hand mirrors it. node: which piece of a file with several variants.
 const GRIP = {
   _default: { pos: [0.0, 0.10, 0.04], rot: [0, 0, 0] },
-  football: { node: "football_inflated", pos: [0.0, 0.15, 0.04], rot: [0, 0, 0] },
+  football: { node: "football_inflated", pos: [0.07, 0.14, 0.04], rot: [0, 0, 0] },   // out to the side of the palm, clear of the thigh
   baseball_bat: { pos: [0.33, 0.08, 0.03], rot: [0, 0, -90] },
   classic_laptop: { pos: [0.0, 0.30, 0.02], rot: [90, 0, 0], prep: o => {   // closed, carried by its edge
     const scr = o.getObjectByName("classic_laptop_screen"); if (scr) { scr.rotation.x = Math.PI / 2; scr.position.y += 0.012; } } },
@@ -300,6 +300,7 @@ const GRIP = {
   Megaphone_01: { pos: [0.0, 0.10, 0.05], rot: [0, 0, 0] },
   plastic_bottle_gallon: { pos: [0.0, 0.20, 0.02], rot: [180, 0, 0] },
 };
+for (const [k, v] of Object.entries(S.grips || {})) GRIP[k] = { ...(GRIP[k] || GRIP._default), ...v };   // per-scene grip tuning / new props
 const props = {};
 async function loadProp(id) {
   if (!/^[\w-]{1,64}$/.test(id || "")) return null;
@@ -499,7 +500,7 @@ function shotPose(s) {
   const fwdOf = a => new V(0, 0, 1).applyQuaternion(a.group.quaternion);
   if (s.type === "close" || s.type === "medium") {
     const h = headPos(A), f = fwdOf(A), side = new V(f.z, 0, -f.x), d = s.type === "close" ? 0.95 : 2.0;
-    const at = s.type === "close" ? h : h.clone().add(new V(0, -0.35, 0));
+    const at = s.type === "close" ? h : h.clone().add(new V(0, cam.aspect < 1 ? -0.18 : -0.35, 0));   // tall frames: headroom
     return { pos: at.clone().addScaledVector(f, d).addScaledVector(side, d * 0.18).add(new V(0, 0.03, 0)), at, focus: h };
   }
   if (s.type === "over") {   // over A's shoulder, looking at B

@@ -88,10 +88,24 @@ Cycles stills; `video_to_motion` captures body and face from a video; `style_che
 catch unwanted changes against approved pictures. Rendering is slow on CPU (720p about 2–4 s a frame);
 start long jobs with `wait=false`.
 
+More places and moves: `add_set` makes any Poly Haven HDRI a set (`hdri` = id or words, e.g. "arena"; presets
+include `arena` for a sandy gladiator arena, `colosseum`, `desert`); `find_sets` searches. `find_moves` searches
+all ~2,400 CMU moves; a beat's `move` may be any CMU id or words and scene_video fetches it (or `fetch_moves`).
+Beats `{"move": "sit"|"lean"|"open", "on": "<set prop id>"}` use a set prop (seated until the actor's next move).
+`make_video_short` = one request (or `beats`) to a vertical 1080x1920 short with bold captions; `make_comic` =
+a scene as a comic page (PNG + PDF) with speech bubbles at the speakers' heads; `finish_picture` = grade,
+sharpen, vignette, grain, background removal and print sizes (A4/A3/4x6/5x7/8x10 at 300 dpi) for stills.
+
 **Check your work before delivering**: run `review_video` on any video you made (look at its contact sheet
 and motion map; read `issues`: frozen or black stretches, jitter, flicker, soft frames) and `describe_audio`
 on anything with sound (read `description`: clipping, true peak, harshness, tempo, a monotone voice). They are
 heuristics, not eyes and ears, but they catch what a single still frame can't show.
+Local AI senses (builder[senses], CPU): `watch_video` asks a small video model (Qwen3-VL-2B) a question
+about a clip or gets a description with per-timestamp notes; `caption_audio` puts a sound into words (CLAP
+tags + describe_audio numbers); `quality_score` gives LPIPS vs a reference and an aesthetic score
+(`visual_diff` with `perceptual: true` adds LPIPS). Second opinions: check the moments they point to.
+`builder bench` (no Claude) renders a short scene, runs audio_check / review_video / style_check /
+quality_score and lists regressions against the last run (`~/.builder/bench/<date>.html`).
 
 New characters: `make_character` (a description, or `params` with no Claude key) builds a MakeHuman person,
 puts it on a stage as `models/<name>.json` and saves it to the library with its voice and persona; use it in
@@ -125,7 +139,10 @@ JSON url>`; it times the beats like scene_video, shows lines as captions with a 
 Beat `prop: {prop, hand: "right"|"left"}` or `"none"` puts a prop from the stage's `props/index.json` in a hand
 (`hold` stays the seconds for a move); grips per prop are in the `GRIP` table in studio.html (right hand; the left
 mirrors it through the rest pose). Keep `~/.builder/stages/<name>/studio.html` in step with
-`tools/makehuman/view/studio.html`. Studio templates live in browser storage until the shared scene library exists.
+`tools/makehuman/view/studio.html`. Saved scenes are library templates (`library_save_scene` / `library_get` /
+`library_list` / `library_delete_scene`). Set props carry `use` data in set.json (add_set.py `USES`: seats,
+lean spots, door hinges); `scene.grips` overrides GRIP per scene; `scene.keep` (frame numbers) renders only
+those frames and `scene.probe` (times) records each head's screen position in the events (comics use both).
 
 ## Picture to 3D model
 

@@ -14,6 +14,7 @@ a pinned commit (about 0.1 MB), its weights (about 1.7 GB) and rembg's u2net (ab
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -96,16 +97,20 @@ class ImageTo3DParams(BaseModel):
     format: Literal["glb", "obj"] = "glb"
     max_faces: int | None = Field(None, ge=500, le=2_000_000, description="Reduce the mesh to about this many triangles (e.g. 20000 for web/games); colours are kept")
     device: Literal["auto", "cpu"] = Field("auto", description="auto uses a CUDA GPU when there is one")
+    texture: bool = Field(False, description="Bake the colours into a UV texture (xatlas unwrap) instead of vertex colours: sharper colours, a normal textured GLB for games and engines. Best with max_faces (e.g. 20000)")
+    texture_size: int = Field(1024, ge=256, le=4096, description="Texture width/height in pixels with texture=true")
 
 
-@operation("image_to_3d", ImageTo3DParams, "Turn a picture of one object into a 3D model (.glb or .obj with vertex colours), free and local with TripoSR: background removal, single-image reconstruction, marching cubes, optional decimation. Best with one object on a plain background; the hidden back is guessed. 1-2 minutes on CPU at resolution 256 (first use downloads ~1.9 GB); start with wait=false.")
+@operation("image_to_3d", ImageTo3DParams, "Turn a picture of one object into a 3D model (.glb or .obj with vertex colours), free and local with TripoSR: background removal, single-image reconstruction, marching cubes, optional decimation, optional baked UV texture. Best with one object on a plain background; the hidden back is guessed. 1-2 minutes on CPU at resolution 256 (first use downloads ~1.9 GB); start with wait=false.")
 def image_to_3d(p: ImageTo3DParams) -> OpResult:
     src = _src(p.file_id)
     if src.suffix.lower() not in IMAGE_TYPES:
         raise OpError(f"image_to_3d needs an image ({', '.join(sorted(IMAGE_TYPES))}), not {src.suffix or 'a file without extension'}")
     worker = Path(os.environ.get("IMAGE3D_WORKER") or WORKER)
+    if p.texture and p.format != "glb":
+        raise OpError("texture=true needs format glb (an OBJ would need a separate .mtl and image)")
     if not os.environ.get("IMAGE3D_WORKER"):
-        missing = missing_packages()
+        missing = missing_packages() + (["xatlas"] if p.texture and importlib.util.find_spec("xatlas") is None else [])
         if missing:
             raise OpError(f"image_to_3d needs {', '.join(missing)}: {INSTALL}")
     from .voice import models_dir
@@ -117,6 +122,8 @@ def image_to_3d(p: ImageTo3DParams) -> OpResult:
         args.append("--no-rembg")
     if p.max_faces:
         args += ["--max-faces", str(p.max_faces)]
+    if p.texture:
+        args += ["--texture", str(p.texture_size)]
     stats: dict = {}
 
     def build(out: Path) -> None:
@@ -135,6 +142,6 @@ def image_to_3d(p: ImageTo3DParams) -> OpResult:
     res = _guarded("image_to_3d", [p.file_id], f"{_stem(p.file_id)}_3d.{p.format}", build)
     res.data = {"engine": "TripoSR (MIT)", "resolution": p.resolution, **stats,
                 "how_to_open": "Drag the .glb into Blender (File > Import > glTF), https://gltf-viewer.donmccurdy.com or a three.js scene; "
-                               "colours are vertex colours (in Blender: material > Color Attribute)."}
+                               + ("colours are a baked UV texture." if p.texture else "colours are vertex colours (in Blender: material > Color Attribute).")}
     return res
 

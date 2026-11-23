@@ -21,6 +21,9 @@ o = Path(out)
 o.mkdir(parents=True, exist_ok=True)
 for i in range(n):
     (o / f"{i + 1:06d}.png").write_bytes(png)
-(o / "events.json").write_text(json.dumps([{"t": 0.5, "step": "L", "pace": "walk"}, {"t": 1.0, "step": "R", "pace": "walk"}]))
+events = [{"t": 0.5, "step": "L", "pace": "walk"}, {"t": 1.0, "step": "R", "pace": "walk"}]
+ids = [c["id"] for c in scene.get("cast") or [{"id": "a"}]]
+events += [{"t": t, "heads": {cid: [0.3 + 0.4 * k / max(1, len(ids) - 1), 0.35, 1] for k, cid in enumerate(ids)}} for t in scene.get("probe", [])]
+(o / "events.json").write_text(json.dumps(events))
 (o / "scene_seen.json").write_text(json.dumps(scene))
 print(f"done: {n} frames")

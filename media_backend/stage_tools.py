@@ -321,3 +321,20 @@ def fetch_moves(p: FetchMovesParams) -> OpResult:
         fetch_clip(stage, r[0], label)
         done.append({"move": label, "id": r[0], "fetched": True})
     return OpResult(data={"stage": p.stage, "moves": done})
+
+
+# ---------------------------------------------------------------- scene templates (the Studio tab's saved scenes)
+
+class DeleteSceneParams(BaseModel):
+    name: str = Field(description="A saved scene template's name (library_list shows them)")
+
+
+@operation("library_delete_scene", DeleteSceneParams, "Delete a saved scene template from the library (characters are not touched).")
+def library_delete_scene(p: DeleteSceneParams) -> OpResult:
+    from .characters import _check_name, _lib_file
+
+    f = _lib_file("scenes", _check_name(p.name, "template name"))
+    if not f.exists():
+        raise OpError(f"no scene template called {p.name!r}")
+    f.unlink()
+    return OpResult(data={"deleted": p.name})

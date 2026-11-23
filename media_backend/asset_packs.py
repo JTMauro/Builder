@@ -156,7 +156,7 @@ def kenney_search(q: str, kind: str, limit: int) -> list[dict[str, Any]]:
     for slug, (title, words) in KENNEY_PACKS.items():
         items = _known_items("kenney", slug)
         hits = _item_hits(q, items)
-        score = _a()._match(q, slug, title, words) + len(hits) * 0.01
+        score = _a()._match(q, slug, title, words) + (1 if hits else 0) + len(hits) * 0.01
         if score >= 1:
             out.append((score, {"source": "kenney", "id": slug, "kind": "model", "title": f"{title} (Kenney pack)",
                                 "preview": None, "page": f"https://kenney.nl/assets/{slug}", "creator": "Kenney", **CC0,
@@ -184,7 +184,7 @@ def quaternius_search(q: str, kind: str, limit: int) -> list[dict[str, Any]]:
     for slug, title in _oga_listing():
         items = _known_items("quaternius", slug)
         hits = _item_hits(q, items)
-        score = _a()._match(q, slug, title, QUATERNIUS_HINTS.get(slug, "")) + len(hits) * 0.01
+        score = _a()._match(q, slug, title, QUATERNIUS_HINTS.get(slug, "")) + (1 if hits else 0) + len(hits) * 0.01
         if score >= 1:
             out.append((score, {"source": "quaternius", "id": slug, "kind": "model", "title": f"{title} (Quaternius pack)",
                                 "preview": None, "page": f"https://opengameart.org/content/{slug}", "creator": "Quaternius", **CC0,
@@ -346,7 +346,7 @@ def to_glb(src: Path, out: Path, strip_rig: bool = False, root: Path | None = No
         except GlbError as e:
             raise OpError(f"couldn't pack {src.name}: {e}") from e
     py, env = blender_python()
-    proc = subprocess.run([*py, str(CONVERT), str(src), str(out)] + (["--strip-rig"] if strip_rig else []),
+    proc = subprocess.run([*py, str(CONVERT), str(src), str(out)] + (["--strip-rig"] if strip_rig else []) + (["--search", str(root)] if root else []),
                           capture_output=True, text=True, timeout=600, env=env, **NO_WINDOW)
     if proc.returncode != 0 or not out.exists():
         raise OpError(f"converting {src.name} to GLB failed:\n" + "\n".join((proc.stderr or proc.stdout).strip().splitlines()[-6:]))

@@ -1,4 +1,4 @@
-"""Command line: `builder serve | mcp | chat | setup | doctor | token | user`.
+"""Command line: `builder serve | mcp | chat | setup | doctor | bench | token | user`.
 
 (`media-backend` is the same command under its old name.)
 """
@@ -30,6 +30,10 @@ def main(argv: list[str] | None = None) -> None:
     setup.add_argument("--skip-engine", action="store_true", help="Don't build or install the engine")
     setup.add_argument("--debug", action="store_true", help="Faster, unoptimised engine build")
     sub.add_parser("doctor", help="Show what's ready and what's missing")
+    bench = sub.add_parser("bench", help="Self-test: render a short scene, check sound, picture and look, compare with the last run (no Claude)")
+    bench.add_argument("--approve", action="store_true", help="Save the character's current look as approved (style_check)")
+    bench.add_argument("--keep-files", action="store_true", help="Keep the files the bench made in the file store")
+    bench.add_argument("--nice", action="store_true", help="Run at low CPU priority (what the nightly schedule uses)")
     token = sub.add_parser("token", help="Make a personal access token for another app or Claude Code")
     token.add_argument("--user", required=True, help="The account the token acts as")
     token.add_argument("--name", default="Another app", help="What the token is for")
@@ -64,6 +68,8 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(_setup(args))
     elif args.cmd == "doctor":
         sys.exit(_doctor())
+    elif args.cmd == "bench":
+        sys.exit(_bench(args))
     elif args.cmd == "token":
         sys.exit(_token(args))
     elif args.cmd == "user":
@@ -164,6 +170,31 @@ def _doctor() -> int:
     return 0 if good else 1
 
 
+def _bench(args) -> int:
+    from . import bench
+
+    if args.nice and hasattr(os, "nice"):
+        try:
+            os.nice(10)
+        except OSError:
+            pass
+    try:
+        r = bench.run_bench(approve=args.approve, keep_files=args.keep_files, log=lambda m: print(m, flush=True))
+    except RuntimeError as e:
+        print(e)
+        return 2
+    for name, st in r["steps"].items():
+        mark = {"ok": "✓", "failed": "✗"}.get(st["status"], "·")
+        extra = st.get("reason") or st.get("error") or ""
+        print(f"  {mark} {name} {st['status']}" + (f" ({st['seconds']} s)" if "seconds" in st else "") + (f": {extra}" if extra else ""))
+    for x in r["regressions"]:
+        print(f"  ! {x}")
+    for x in r["changes"]:
+        print(f"  ~ {x}")
+    print(f"Report: {bench.bench_dir() / (r['stamp'] + '.html')} ({r['seconds']} s)")
+    return 0 if r["ok"] else 1
+
+
 def _studio_checks(data_dir: Path) -> list[tuple[bool, str]]:
     """Optional tools for people, voices and film. Missing ones never fail `doctor`; each line says how to add it."""
     import importlib.util
@@ -184,6 +215,17 @@ def _studio_checks(data_dir: Path) -> list[tuple[bool, str]]:
         (bool(finish._tool("REALESRGAN_BIN", ["realesrgan-ncnn-vulkan", "realesrgan-ncnn-vulkan.exe"])), "AI upscaling (Real-ESRGAN): set REALESRGAN_BIN or put it on PATH (needs a GPU)"),
         (bool(finish._tool("RIFE_BIN", ["rife-ncnn-vulkan", "rife-ncnn-vulkan.exe"])), "smooth motion (RIFE): set RIFE_BIN or put it on PATH (needs a GPU)"),
     ]
+    try:
+        from . import bench, senses
+
+        ss = senses.status()
+        pk = ss["torch"] and ss["transformers"]
+        out.append((pk and ss["vlm"], "watch_video (Qwen3-VL-2B, CPU): " + ("ready" if pk and ss["vlm"] else "model downloads on first use (~4.3 GB)" if pk else "pip install 'builder[senses]'")))
+        out.append((pk and ss["clap"], "caption_audio (CLAP): " + ("ready" if pk and ss["clap"] else "model downloads on first use (~780 MB)" if pk else "pip install 'builder[senses]'")))
+        out.append((pk and ss["lpips"] and ss["clip"], "quality_score (LPIPS + aesthetic): " + ("ready" if pk and ss["lpips"] and ss["clip"] else "downloads on first use (~850 MB)" if pk and ss["lpips"] else "pip install 'builder[senses]'")))
+        out.extend(bench.doctor_lines())
+    except Exception as e:  # never let an optional check break doctor
+        out.append((False, f"senses / bench: check failed ({e})"))
     try:
         st = unreal.status()
         out.append((bool(st.get("editor")), f"Unreal Engine: {st.get('editor') or 'not found (set UNREAL_EDITOR)'}"))

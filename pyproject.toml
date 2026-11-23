@@ -20,7 +20,11 @@ voice = ["kokoro-onnx>=0.4", "faster-whisper>=1.1", "numpy>=1.26"]
 motion = ["mediapipe>=0.10", "numpy>=1.26"]
 # Picture to 3D model (TripoSR, MIT): pip install "builder[image3d]" --extra-index-url https://download.pytorch.org/whl/cpu
 image3d = ["torch>=2.1", "omegaconf>=2.3", "einops>=0.7", "transformers>=4.35", "trimesh>=4.0", "rembg>=2.0.50",
-           "scikit-image>=0.22", "fast-simplification>=0.1", "imageio>=2.30", "huggingface_hub>=0.20", "numpy>=1.26", "pillow>=10"]
+           "scikit-image>=0.22", "fast-simplification>=0.1", "imageio>=2.30", "huggingface_hub>=0.20", "numpy>=1.26", "pillow>=10",
+           "xatlas>=0.0.9", "scipy>=1.10"]  # xatlas (MIT): UV unwrap for texture=true / bake_texture
+# Local senses: watch_video (Qwen3-VL-2B), caption_audio (CLAP), quality_score (LPIPS + LAION aesthetic), all CPU:
+# pip install "builder[senses]" --extra-index-url https://download.pytorch.org/whl/cpu
+senses = ["torch>=2.4", "torchvision>=0.19", "transformers>=4.57", "lpips>=0.1.4", "huggingface_hub>=0.20", "numpy>=1.26", "pillow>=10"]
 
 [project.scripts]
 media-backend = "media_backend.cli:main"

@@ -31,6 +31,9 @@ builder serve                 # http://127.0.0.1:8000/  (add --host 0.0.0.0 to l
 
 Everything lives in `~/.builder`: accounts, files, Craft projects and the engine. The web app, other
 apps and Claude Code all share it. `builder doctor` shows what's ready.
+`builder bench` is a self-test that costs no Claude usage: it renders a 4-second scene and checks sound,
+picture and look against the last run (report in `~/.builder/bench/`; `--approve` saves the character's look).
+Set `BUILDER_BENCH=1` (and `BUILDER_BENCH_HOUR`, default 3) to run it nightly inside `builder serve`.
 
 **2. Use it in the browser:** open the address above, make your account, and use the **Craft** and
 **Audio & video** tabs.
@@ -186,19 +189,27 @@ claude mcp add builder -- builder mcp
 | `make_ambience` | Room tone and backgrounds: room, office, outdoors, city, rain, wind, crowd_murmur, forest (any length, seeded) |
 | `footsteps` | Footsteps on wood, concrete, grass, gravel, carpet, tile or snow; walk/run or `steps_per_s`, a `count` or `length_s`, or exact `times` (an animation's foot contacts) |
 | `audio_check` | Sound QC report (.json): loudness (LUFS) vs a target, true peak, clipping, long silences, DC offset; with `expected_text`, Whisper word match against the script (missing/extra words, WER) |
-| `scene_video` | A finished video of 3D characters acting out beats (lines, moves, walking, camera shots and cuts), with several characters, sets (park, living room, street), voices, lip-sync, footsteps, music, captions and a film look |
+| `scene_video` | A finished video of 3D characters acting out beats (lines, moves, walking, camera shots and cuts), with several characters, sets (park, living room, street, arena…), voices, lip-sync, footsteps, music, captions (or bold social captions) and a film look; vertical 720x1280 / 1080x1920 and square sizes. A beat's `move` can be any of the ~2,400 CMU moves by id or words (fetched on demand); `move` sit / lean / open with `on` uses a set prop (sit on a bench facing out and stay seated, lean on a table or wall, open a door) |
+| `add_set` / `find_sets` | Any Poly Haven HDRI as a set (by id or search words like "arena", "desert", "night city"; the best match is used) with optional Poly Haven props or a built-in door, sensible ground height/radius/exposure from the HDRI's data; presets park, living_room, street, beach, gym, school, cafe, stadium, snow, arena (sandy gladiator arena), colosseum, desert, ruins, circus. Props that people use carry `use` data (seats, lean spots, door hinges) |
+| `find_moves` / `fetch_moves` | Search all ~2,400 CMU motion-capture moves (title, category, length, whether they retarget cleanly) and download any of them into a stage under a label |
+| `make_video_short` | One request to a finished vertical short: the director plans it (or give `beats`), shots are made closer for the tall frame, rendered at 1080x1920 (720x1280 drafts) with bold captions, then trimmed and set to social loudness |
+| `make_comic` | A scene as a comic page or storyboard: chosen beats rendered as stills (no voices needed), a grid of panels with speech bubbles pointing at each speaker's head, caption boxes, a title; PNG + PDF |
+| `finish_picture` | Finish a still: optional background removal, colour grade (film looks plus natural, vivid, portrait, matte, golden, teal & orange), sharpen, vignette, grain, crop or pad to A4 / A3 / 4x6 / 5x7 / 8x10 / square at 300 dpi with a Lanczos upscale; PNG or JPG |
 | `direct_scene` | Plain words in, finished video out: Claude plans the shots, `scene_video` renders them, Claude watches the result and revises it (needs `ANTHROPIC_API_KEY`) |
 | `make_anything` | Picks and runs the right tool for a request (video, still, music, ambience, voice, 3D from a picture); for games and pages it explains how to start a Craft build |
 | `render_still` | Photoreal Blender Cycles still of a MakeHuman character (skin subsurface, HDRI light, depth of field, up to 4K) |
 | `make_character` | A new realistic 3D person from plain words (Claude picks MakeHuman settings from the installed hair, outfits, shoes and eye colours, plus a voice and a persona; needs `ANTHROPIC_API_KEY`) or from explicit `params`; builds it with MakeHuman (~30 s), adds it to a stage as `models/<name>.json` and saves it to the library. Refuses real people and famous characters |
 | `library_list` / `library_get` | The character library (`~/.builder/library` or `BUILDER_LIBRARY_DIR`, seeded from `studio/characters/`): characters with voice, persona and stages, each stage's models and sets, voices, scene templates; `library_get` returns a template as ready-to-use `scene_video` params with library voices filled in |
-| `library_save_scene` | Save `scene_video` params as a named template; cast members name library characters as their `model` and pick up their voice |
+| `library_save_scene` / `library_delete_scene` | Save `scene_video` params as a named template (the Studio tab's saved scenes); cast members name library characters as their `model` and pick up their voice |
 | `export_character` | A stage character as a game-ready `.glb` with named animations baked in (idle, walk, run, gestures, CMU moves; `moves`, `morphs`, `in_place`) for the Craft engine, Godot or three.js; loads it back to check the clips and renders a preview frame |
 | `video_to_motion` | Body and face motion capture from an ordinary video (MediaPipe): landmarks per frame plus face shapes mapped to talking-character morphs |
 | `visual_diff` | Compares a new picture or frame with an approved one: SSIM score, pass/fail and a heat map of what changed |
 | `review_video` | Check a video before delivering: contact sheet PNG (evenly spaced frames, timestamps), motion map PNG (heat map of where things moved + per-frame motion/jitter and brightness strips with cuts, black and frozen spans) and a .json report: per-second motion energy, scene cuts, black/frozen frames, flicker, brightness/contrast/saturation, sharpness, letterbox bars, jitter (back-and-forth shaking). Heuristics |
 | `describe_audio` | Hear a sound without ears: a plain-language summary plus numbers (loudness, brightness, harshness 2–5 kHz, bass weight, dynamic range, noise floor, tempo and beat regularity, voice pitch and monotone/robotic risk, rough speech/music/silence shares, stereo width, clipping), a spectrogram PNG, an annotated waveform PNG (with pitch track) and a .json report. Works on a video's sound too. Heuristics |
 | `style_check` | Renders a stage's fixed views and compares them with the approved look (or approves the current look) |
+| `watch_video` | A local video-understanding model (Qwen3-VL-2B-Instruct, Apache-2.0, CPU) watches frames sampled over time and answers a question about the clip ("is she waving?") or describes it, with per-timestamp notes and a .json report. A second opinion: right about who/where/big gestures and shot changes, unreliable on small details (hands through legs, exact subtitles). ~30–60 s per question on 4 CPU cores; first use downloads ~4.3 GB; needs `pip install "builder[senses]"` |
+| `caption_audio` | A sound in words: what it is (speech, music, ambience, effects and ~35 event labels), instruments, voice qualities, room, mood and recording quality from CLAP zero-shot tagging (laion/larger_clap_general, Apache-2.0), joined with `describe_audio`'s numbers into one sentence, plus per-10-second tags. `extra_labels` tests your own ("a basketball bouncing"). A few seconds on CPU; first use downloads ~780 MB |
+| `quality_score` | How a render looks: LPIPS perceptual distance to a reference (0 = same, >0.3 very different; tells blur from grain where SSIM can't) and a no-reference aesthetic score (LAION predictor v1 on CLIP ViT-B/32, MIT). Images or videos. `visual_diff` takes `perceptual: true` to add LPIPS. First use downloads ~850 MB |
 | `film_look` | Film grade presets or your own .cube LUT, grain, vignette, cinema bars |
 | `upscale` | 2x/4x (Real-ESRGAN when installed, else sharp Lanczos) |
 | `smooth_motion` | 60 fps or slow motion by in-between frames (RIFE when installed, else ffmpeg) |
@@ -270,17 +281,21 @@ drive it with `window.__speakLine({text, duration, cues, words}, audioArrayBuffe
 The **🎬 Studio** tab builds a `scene_video` for you:
 
 - **Stage and place:** a stage with a `studio.html`, and one of its sets (park, living room, street, beach, gym,
-  school, cafe, stadium, snow…) or the grey studio.
+  school, cafe, stadium, snow, arena…; add any Poly Haven place with `add_set`) or the grey studio.
 - **Cast:** up to six characters from the stage's models, each with a Kokoro voice. Drag them on the floor plan
   (the camera is at the bottom; arrow keys nudge the selected one) or type x/z in metres and a facing in degrees.
 - **Beats:** one row per moment: who, what they say, a move or gesture, where they look (camera or another
   character), a camera shot (wide, two, medium, close, over-the-shoulder, with an optional glide), a spot to
   walk or run to, a prop to hold (from the stage's `props/`) and how long to hold a move. Reorder, copy or remove rows.
+  Pick **sit**, **lean** or **open** as the move and choose the set prop it's **On** (a bench, stool, table, door).
+  **Any move** searches all 2,400 CMU motion-capture moves and adds the one you pick to the stage.
 - **Preview** plays the scene live in the stage's `studio.html?preview`, with captions and an approximate mouth
   in place of voices. **Render** runs `scene_video` as a background job and shows the video with a download link
   (it's in the library too). **Ask the director** hands a plain-words request to `direct_scene` (needs a Claude
   key) and can load its plan into the editor.
-- **Templates** are saved in this browser for now, and your draft is kept between visits.
+- **Saved scenes** go to the shared library (`library_save_scene`), so they follow you between computers; scenes
+  saved in a browser before are moved there once. Your draft is kept between visits. Vertical sizes (720x1280,
+  1080x1920) and square are in **Size**.
 
 `GET /studio/stages` lists the stages with their sets, models and moves, plus the voices.
 

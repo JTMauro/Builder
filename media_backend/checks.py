@@ -21,6 +21,7 @@ class VisualDiffParams(BaseModel):
     reference_id: str = Field(description="The approved image (or video) to compare against")
     at: float = Field(0, ge=0, description="Seconds into a video to compare")
     min_ssim: float = Field(0.97, ge=0, le=1, description="Pass when similarity is at least this (1 = identical)")
+    perceptual: bool = Field(False, description="Also measure LPIPS (perceptual distance, 0 = looks the same) with a local model; needs builder[senses]")
 
 
 def _measure(a: str, b: str, at: float) -> tuple[float, float]:
@@ -49,6 +50,10 @@ def visual_diff(p: VisualDiffParams) -> OpResult:
              "[r2]format=gray,format=rgb24,colorlevels=romax=0.35:gomax=0.35:bomax=0.35[bg];[bg][d]blend=all_mode=addition")
     data = {"ssim": round(ssim, 5), "psnr_db": None if psnr == float("inf") else round(psnr, 2),
             "pass": ssim >= p.min_ssim, "min_ssim": p.min_ssim}
+    if p.perceptual:
+        from . import senses
+
+        data.update(senses.lpips_files(p.file_id, p.reference_id, p.at))
     return _guarded("visual_diff", [p.file_id, p.reference_id], f"{_stem(p.file_id)}_vs_{_stem(p.reference_id)}_diff.png",
                     lambda out: _ffmpeg(*seek, "-i", str(a), *seek, "-i", str(b), "-frames:v", "1", "-filter_complex", graph, str(out)),
                     data=data)

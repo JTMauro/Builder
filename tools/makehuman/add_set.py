@@ -46,7 +46,7 @@ SETS = {
              "props": [{"id": "fir_tree_01", "at": [-3.0, -3.2], "rot": 0}, {"id": "fir_tree_01", "at": [3.4, -4.0], "rot": 90}]},
     # a sandy round arena inside old walls: the gladiator-arena set
     "arena": {"hdri": "old_outdoor_theater", "ground": {"height": 1.7, "radius": 35}, "exposure": 0.8,
-              "props": [{"id": "Barrel_01", "at": [-2.8, -2.4], "rot": 20}, {"id": "Barrel_01", "at": [-3.5, -1.9], "rot": 70}, {"id": "wooden_crate_01", "at": [2.6, -2.4], "rot": -15},
+              "props": [{"id": "wine_barrel_01", "at": [-2.8, -2.4], "rot": 20}, {"id": "wine_barrel_01", "at": [-3.5, -1.7], "rot": 70}, {"id": "wooden_crate_01", "at": [2.6, -2.4], "rot": -15},
                         {"id": "painted_wooden_stool", "at": [1.8, -1.2], "rot": -20}, {"id": "door", "at": [0.0, -4.2], "rot": 0}]},
     "colosseum": {"hdri": "colosseum", "ground": {"height": 1.7, "radius": 45}, "exposure": 0.8,
                   "props": [{"id": "boulder_01", "at": [-2.8, -2.6], "rot": 0}]},
@@ -85,6 +85,7 @@ USES = {
     "CoffeeCart_01": {"lean": {"at": [0, 0.75], "face": 180, "kind": "table"}},
     "wooden_crate_01": {"sit": {"seats": [[0, 0.36, 0]], "face": 0}},
     "Barrel_01": {"lean": {"at": [0, 0.6], "face": 180, "kind": "table"}},
+    "wine_barrel_01": {"lean": {"at": [0, 0.7], "face": 180, "kind": "table"}},
     "wooden_barrels_01": {"lean": {"at": [0, 1.65], "face": 0, "kind": "wall"}},
     # a simple built-in door (no download): frame + panel, hinged on its left edge
     "door": {"open": {"hinge": [-0.45, 0], "angle": 100, "seconds": 1.2, "stand": [0.15, 0.75]}, "lean": {"at": [0.95, 0.3], "face": 0, "kind": "wall"}},

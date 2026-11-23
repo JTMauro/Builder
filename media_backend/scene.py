@@ -82,7 +82,8 @@ class SceneParams(BaseModel):
     set: str | None = Field(None, description="A place on the stage: park, living_room, street, beach, gym, school, cafe, stadium, snow (see the stage's sets folder); default the grey studio")
     quality: Literal["film", "fast"] = Field("film", description="fast skips ambient occlusion (quicker renders)")
     voice: Literal[tuple(VOICES)] = Field("am_puck", description="Default voice")  # type: ignore[valid-type]
-    resolution: Literal["640x360", "1280x720", "1920x1080", "2560x1440", "3840x2160"] = "1280x720"
+    resolution: Literal["640x360", "1280x720", "1920x1080", "2560x1440", "3840x2160", "360x640", "720x1280", "1080x1920", "1080x1080"] = Field("1280x720", description="Width x height; 720x1280 / 1080x1920 are vertical (shorts), 1080x1080 square")
+    caption_style: Literal["normal", "bold"] = Field("normal", description="bold: big white words with a black outline in the lower third (social shorts)")
     fps: int = Field(30, ge=12, le=60)
     captions: bool = True
     look: Literal["film", "warm", "cool", "noir", "vintage", "bleach", "none"] = "film"
@@ -278,10 +279,16 @@ def scene_video(p: SceneParams) -> OpResult:
             from .voice import _filter_path
 
             srt = work / "captions.srt"
-            srt.write_text(_captions(lines), encoding="utf-8")
-            size = max(14, round(h / 720 * 20))
-            vf.append(f"subtitles='{_filter_path(srt)}':force_style='FontName=DejaVu Sans,Fontsize={size},PrimaryColour=&H00FFFFFF,"
-                      f"BackColour=&H80000000,BorderStyle=4,Outline=0,Shadow=0,Alignment=2,MarginV=22'")
+            srt.write_text(_captions(lines, 4 if p.caption_style == "bold" else 7), encoding="utf-8")
+            short = min(w, h)
+            if p.caption_style == "bold":   # libass sizes against a 288-line script height, whatever the video size
+                size = 13 if h > w else 18
+                vf.append(f"subtitles='{_filter_path(srt)}':force_style='FontName=DejaVu Sans,Bold=1,Fontsize={size},PrimaryColour=&H00FFFFFF,"
+                          f"OutlineColour=&H00000000,BorderStyle=1,Outline=2.2,Shadow=0,Alignment=2,MarginV={60 if h > w else 30}'")
+            else:
+                size = max(14, round(short / 720 * 20))
+                vf.append(f"subtitles='{_filter_path(srt)}':force_style='FontName=DejaVu Sans,Fontsize={size},PrimaryColour=&H00FFFFFF,"
+                          f"BackColour=&H80000000,BorderStyle=4,Outline=0,Shadow=0,Alignment=2,MarginV=22'")
         vf.append("format=yuv420p")
         args += ["-filter_complex", ";".join([f"[0:v]{','.join(vf)}[vout]"] + fc), "-map", "[vout]"]
         if tracks:

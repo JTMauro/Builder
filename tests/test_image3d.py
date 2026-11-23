@@ -111,3 +111,17 @@ def test_coarse_to_fine_grid_matches_full_grid():
     lin = torch.linspace(0, 1, n)
     full = dens(torch.stack(torch.meshgrid(lin, lin, lin, indexing="ij"), -1).reshape(-1, 3)).reshape(n, n, n).numpy()
     assert ((vol > 25) == (full > 25)).all() and queried < n ** 3 / 4
+
+
+def test_image_to_3d_texture_option(fake_model, tmp_path, monkeypatch):
+    res = ops.run_operation("image_to_3d", {"file_id": _image(tmp_path), "texture": True, "texture_size": 2048, "max_faces": 20000})
+    assert res.data["args"]["--texture"] == "2048" and "baked UV texture" in res.data["how_to_open"]
+    assert "--texture" not in ops.run_operation("image_to_3d", {"file_id": _image(tmp_path)}).data["args"]
+    with pytest.raises(ops.OpError, match="texture=true needs format glb"):
+        ops.run_operation("image_to_3d", {"file_id": _image(tmp_path), "texture": True, "format": "obj"})
+    monkeypatch.delenv("IMAGE3D_WORKER", raising=False)
+    monkeypatch.setattr(image3d, "missing_packages", lambda: [])
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: None if name == "xatlas" else real(name, *a))
+    with pytest.raises(ops.OpError, match="needs xatlas"):
+        ops.run_operation("image_to_3d", {"file_id": _image(tmp_path), "texture": True})

@@ -3,16 +3,28 @@
    Make a scene without code: a stage and a place, a cast placed on a floor plan, a list of beats (who says what,
    moves, where they look, camera shots, walking, props). Preview plays it live in the stage's studio.html
    (?preview, the scene arrives by postMessage); Render runs scene_video as a background job; the director
-   (direct_scene) plans one from plain words. Uses app.js helpers: $, h, api, store, setBusy, contentUrl, loadFiles. */
+   (direct_scene) plans one from plain words. Saved scenes live in the shared library (library_save_scene /
+   library_get / library_list / library_delete_scene). Any of the ~2,400 CMU moves can be found (find_moves) and added
+   to the stage (fetch_moves). Beats can use set props: sit on a bench, lean on a table, open a door.
+   Uses app.js helpers: $, h, api, store, setBusy, contentUrl, loadFiles. */
 
 const SHOTS = ["", "wide", "two", "medium", "close", "over"];
 const studio = {
-  loaded: false, stages: [], voices: {}, info: null, props: [],
+  loaded: false, stages: [], voices: {}, info: null, props: [], setProps: [], library: [],
   cast: [], beats: [], job: null, previewing: false,
 };
-const STUDIO_DRAFT = "mb_studio_draft", STUDIO_TPL = "mb_studio_templates";
-// TODO: when the shared scene library ops (library_save_scene / library_get / library_list) land, save templates there
-// so they follow the person between computers; until then they stay in this browser.
+const STUDIO_DRAFT = "mb_studio_draft", STUDIO_TPL = "mb_studio_templates";   // STUDIO_TPL: old browser-only templates (moved to the library once)
+const PROP_MOVES = ["sit", "lean", "open"];
+async function op(name, params) {   // run an operation and wait for it
+  const job = await api(`/ops/${name}`, { method: "POST", json: params });
+  if (job.status !== "succeeded") throw new Error(job.error || `${name} didn't finish`);
+  return job;
+}
+const tplName = (s) => {   // library names: lower-case letters, digits, - or _, starting with a letter, up to 32
+  let n = s.toLowerCase().trim().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!/^[a-z]/.test(n)) n = "scene-" + n;
+  return n.slice(0, 32).replace(/-+$/, "");
+};
 
 const num = (v, d = 0) => (v === "" || v == null || Number.isNaN(+v) ? d : +v);
 const opt = (value, text, selected) => h("option", { value, text: text ?? value, selected: selected ? true : null });
@@ -32,12 +44,17 @@ async function loadStudio() {
   $("#st-empty").hidden = has;
   $("#st-body").hidden = !has;
   if (!has) return;
+  for (const r of ["720x1280", "1080x1920", "1080x1080"]) {   // vertical / square sizes for shorts
+    if (![...$("#st-res").options].some((o) => o.value === r)) $("#st-res").append(opt(r, `${r}${r === "1080x1080" ? " (square)" : " (vertical)"}`));
+  }
   $("#st-stage").replaceChildren(...studio.stages.map((s) => opt(s.name, s.name[0].toUpperCase() + s.name.slice(1))));
   let draft = null;
   try { draft = JSON.parse(store.get(STUDIO_DRAFT) || "null"); } catch { /* no draft */ }
   const name = studio.stages.some((s) => s.name === draft?.stage) ? draft.stage : studio.stages.some((s) => s.name === "teen") ? "teen" : studio.stages[0].name;
   await pickStage(name, draft);
+  await migrateTemplates();
   renderTemplates();
+  addMoveFinder();
 }
 
 async function pickStage(name, scene = null) {
@@ -50,6 +67,27 @@ async function pickStage(name, scene = null) {
     if (r.ok) studio.props = await r.json();
   } catch { /* a stage without props */ }
   applyScene(scene || defaultScene());
+  await loadSetProps();
+}
+async function loadSetProps() {   // the props on the chosen set that people can use (sit / lean / open)
+  studio.setProps = [];
+  const set = $("#st-set").value;
+  if (set) {
+    try {
+      const r = await fetch(`/stages/${encodeURIComponent(studio.info.name)}/sets/${encodeURIComponent(set)}/set.json`, { credentials: "same-origin" });
+      if (r.ok) {
+        const spec = await r.json();
+        const seen = {};
+        for (const p of spec.props || []) {
+          const id = p.id || (p.file || "").split("/")[0];
+          if (!p.use || !id) continue;
+          seen[id] = (seen[id] || 0) + 1;
+          studio.setProps.push({ id: seen[id] > 1 ? `${id}#${seen[id]}` : id, uses: Object.keys(p.use) });
+        }
+      }
+    } catch { /* no props */ }
+  }
+  renderBeats();
 }
 
 function defaultScene() {
@@ -81,7 +119,7 @@ function applyScene(sc) {
       shot: b.shot?.type || "", shotActor: b.shot?.actor || "", shotTarget: b.shot?.target || "", glide: num(b.shot?.move),
       wx: b.walk_to ? b.walk_to[0] : "", wz: b.walk_to ? b.walk_to[1] : "", run: !!b.run,
       hold: typeof b.hold === "number" ? b.hold : 2.5,
-      prop: prop === "none" ? "none" : prop?.prop || "", hand: prop?.hand || "right",
+      prop: prop === "none" ? "none" : prop?.prop || "", hand: prop?.hand || "right", on: b.on || "",
     };
   });
   if (!studio.beats.length) studio.beats.push(blankBeat());
@@ -93,7 +131,7 @@ function applyScene(sc) {
   renderBeats();
 }
 
-const blankBeat = () => ({ actor: "", say: "", move: "", look: "", shot: "", shotActor: "", shotTarget: "", glide: 0, wx: "", wz: "", run: false, hold: 2.5, prop: "", hand: "right" });
+const blankBeat = () => ({ actor: "", say: "", move: "", look: "", shot: "", shotActor: "", shotTarget: "", glide: 0, wx: "", wz: "", run: false, hold: 2.5, prop: "", hand: "right", on: "" });
 
 function sceneParams() {
   const ids = studio.cast.map((c) => c.id);
@@ -111,6 +149,7 @@ function sceneParams() {
     }
     if (b.wx !== "" && b.wz !== "") { o.walk_to = [num(b.wx), num(b.wz)]; if (b.run) o.run = true; }
     if (b.prop) o.prop = b.prop === "none" ? "none" : { prop: b.prop, hand: b.hand };
+    if (b.on && PROP_MOVES.includes(b.move)) o.on = b.on;
     return o;
   });
   return {
@@ -208,7 +247,10 @@ function renderBeats() {
       h("div", { class: "beat-grid" },
         field("Who", selectEl(actorOpts, b.actor, { onchange: set("actor") })),
         field("Says", h("input", { value: b.say, maxlength: 600, placeholder: "(nothing)", oninput: set("say") }), "wide2"),
-        field("Move", selectEl(["", ...(studio.info.moves || [])], b.move, { onchange: set("move") })),
+        field("Move", selectEl(["", ...new Set([...(studio.info.moves || []), ...(studio.setProps.length ? ["lean", "open"] : [])])], b.move, { onchange: set("move", true) })),
+        ...(PROP_MOVES.includes(b.move) && studio.setProps.some((p) => p.uses.includes(b.move)) ? [
+          field("On", selectEl([["", "(no prop)"], ...studio.setProps.filter((p) => p.uses.includes(b.move)).map((p) => [p.id, p.id.replace(/_/g, " ").replace(/ 01$/, "")])], b.on, { onchange: set("on") })),
+        ] : []),
         field("Looks at", selectEl([["", "(as before)"], ["camera", "camera"], ...ids.map((x) => [x, x])], b.look, { onchange: set("look") })),
         field("Shot", selectEl(SHOTS.map((s) => [s, s || "(keep)"]), b.shot, { onchange: set("shot", true) })),
         ...(b.shot ? [
@@ -316,18 +358,65 @@ async function direct() {
   }
 }
 
-/* ---------------------------------------------------------------- templates (this browser) */
-function templates() { try { return JSON.parse(store.get(STUDIO_TPL) || "{}"); } catch { return {}; } }
-function renderTemplates() {
-  const t = templates();
-  const names = Object.keys(t).sort();
+/* ---------------------------------------------------------------- templates (the shared library) */
+async function refreshLibrary() {
+  try { studio.library = (await op("library_list", {})).data.scenes || []; } catch (e) { $("#st-status").textContent = `Saved scenes: ${e.message}`; }
+}
+async function renderTemplates() {
+  await refreshLibrary();
+  const names = studio.library.map((t) => t.name).sort();
   $("#st-tpl-list").replaceChildren(...(names.length ? names.map((n) => opt(n)) : [opt("", "No saved scenes yet")]));
   $("#st-tpl-load").disabled = $("#st-tpl-del").disabled = !names.length;
+}
+async function migrateTemplates() {   // scenes saved in this browser before the library: move them there once
+  let old = {};
+  try { old = JSON.parse(store.get(STUDIO_TPL) || "{}"); } catch { old = {}; }
+  const names = Object.keys(old);
+  if (!names.length) return;
+  const left = {};
+  for (const n of names) {
+    try { await op("library_save_scene", { name: tplName(n), params: old[n], description: `From this browser: ${n}` }); }
+    catch (e) { if (!/exists/.test(e.message)) left[n] = old[n]; }
+  }
+  if (Object.keys(left).length) store.set(STUDIO_TPL, JSON.stringify(left)); else store.set(STUDIO_TPL, "{}");
+}
+
+/* ---------------------------------------------------------------- find any CMU move */
+function addMoveFinder() {
+  if ($("#st-move-find")) return;
+  const input = h("input", { id: "st-move-find", maxlength: 120, placeholder: "Find a move: sword fight, sit down, drunk walk…", "aria-label": "Find a move" });
+  const out = h("div", { class: "small-text", id: "st-move-results", "aria-live": "polite" });
+  const go = async () => {
+    const words = input.value.trim();
+    if (!words) return;
+    out.textContent = "Searching…";
+    try {
+      const r = (await op("find_moves", { words, stage: studio.info.name, limit: 8 })).data;
+      out.replaceChildren(...(r.moves.length ? r.moves.map((m) => h("button", {
+        type: "button", class: "btn ghost small", title: `${m.title} · ${m.category} · CMU ${m.id}`,
+        text: `${m.on_stage ? "✓ " : "+ "}${m.stage_label || m.label} (${Math.round(m.seconds)} s)`,
+        onclick: () => addMove(m, out),
+      })) : [h("span", { text: "Nothing found; try other words." })]));
+    } catch (e) { out.textContent = e.message; }
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+  const row = h("div", { class: "row" }, input, h("button", { type: "button", class: "btn small", text: "Find", onclick: go }));
+  $("#st-add-beat").after(h("div", { class: "move-finder" }, h("strong", { text: "Any move (2,400 from CMU motion capture)" }), row, out));
+}
+async function addMove(m, out) {
+  const label = m.stage_label || m.label;
+  out.textContent = `Adding “${label}” to the stage…`;
+  try {
+    if (!m.on_stage) await op("fetch_moves", { stage: studio.info.name, moves: [m.id], labels: [label] });
+    if (!studio.info.moves.includes(label)) studio.info.moves.push(label);
+    renderBeats();
+    out.textContent = `“${label}” is ready: pick it as a beat's Move.`;
+  } catch (e) { out.textContent = e.message; }
 }
 
 /* ---------------------------------------------------------------- wiring */
 $("#st-stage").addEventListener("change", (e) => { pickStage(e.target.value); showStage("none"); saveDraft(); });
-$("#st-set").addEventListener("change", saveDraft);
+$("#st-set").addEventListener("change", () => { saveDraft(); loadSetProps(); });
 for (const id of ["#st-res", "#st-fps", "#st-music", "#st-look", "#st-quality", "#st-captions"]) $(id).addEventListener("change", saveDraft);
 $("#st-add-cast").addEventListener("click", () => {
   let n = studio.cast.length; let id;
@@ -339,19 +428,31 @@ $("#st-add-beat").addEventListener("click", () => { studio.beats.push(blankBeat(
 $("#st-preview").addEventListener("click", preview);
 $("#st-render").addEventListener("click", render);
 $("#st-direct-go").addEventListener("click", direct);
-$("#st-tpl-save").addEventListener("click", () => {
-  const name = $("#st-tpl-name").value.trim();
-  if (!name) { $("#st-tpl-name").focus(); return; }
-  const t = templates(); t[name] = sceneParams(); store.set(STUDIO_TPL, JSON.stringify(t));
-  $("#st-tpl-name").value = ""; renderTemplates(); $("#st-tpl-list").value = name;
+$("#st-tpl-save").addEventListener("click", async () => {
+  const raw = $("#st-tpl-name").value.trim();
+  if (!raw) { $("#st-tpl-name").focus(); return; }
+  const name = tplName(raw);
+  const exists = studio.library.some((t) => t.name === name);
+  if (exists && !confirm(`Replace the saved scene “${name}”?`)) return;
+  try {
+    await op("library_save_scene", { name, params: sceneParams(), description: raw, overwrite: exists });
+    $("#st-tpl-name").value = "";
+    await renderTemplates(); $("#st-tpl-list").value = name;
+    $("#st-status").textContent = `Saved “${name}” to the library.`;
+  } catch (e) { $("#st-status").textContent = `Couldn't save: ${e.message}`; }
 });
 $("#st-tpl-load").addEventListener("click", async () => {
-  const sc = templates()[$("#st-tpl-list").value];
-  if (!sc) return;
-  if (sc.stage && sc.stage !== studio.info.name && studio.stages.some((s) => s.name === sc.stage)) await pickStage(sc.stage, sc);
-  else applyScene(sc);
-  saveDraft();
+  const name = $("#st-tpl-list").value;
+  if (!name) return;
+  try {
+    const sc = (await op("library_get", { name, kind: "scene" })).data.scene_video_params;
+    if (sc.stage && sc.stage !== studio.info.name && studio.stages.some((s) => s.name === sc.stage)) await pickStage(sc.stage, sc);
+    else { applyScene(sc); await loadSetProps(); }
+    saveDraft();
+  } catch (e) { $("#st-status").textContent = `Couldn't load: ${e.message}`; }
 });
-$("#st-tpl-del").addEventListener("click", () => {
-  const t = templates(); delete t[$("#st-tpl-list").value]; store.set(STUDIO_TPL, JSON.stringify(t)); renderTemplates();
+$("#st-tpl-del").addEventListener("click", async () => {
+  const name = $("#st-tpl-list").value;
+  if (!name || !confirm(`Delete the saved scene “${name}”?`)) return;
+  try { await op("library_delete_scene", { name }); await renderTemplates(); } catch (e) { $("#st-status").textContent = e.message; }
 });

@@ -191,11 +191,17 @@ class TranscribeParams(BaseModel):
     file_id: str = Field(description="Audio or video with speech")
     model: Literal["tiny", "base", "small", "medium", "large-v3"] = Field("base", description="Bigger = more accurate, slower (small is a good balance; large-v3 for difficult audio)")
     language: str | None = Field("en", max_length=8, description="Language code, or null to detect it")
+    precise: bool = Field(False, description="Refine every word's start/end with forced alignment (wav2vec2, English) so captions hit words exactly")
 
 
 @operation("transcribe", TranscribeParams, "Transcribe speech with Whisper (free, local): captions as .srt and .vtt files, plus the text and every word's timing.")
 def transcribe(p: TranscribeParams) -> OpResult:
     segments, words, lang = words_of(p.file_id, p.model, p.language)
+    timing = None
+    if p.precise:
+        from .audio_plus import precise_words
+
+        words, timing = precise_words(p.file_id, words, lang)
     cues = _cues(words) if words else [(s["start"], s["end"], s["text"]) for s in segments]
     srt = "\n".join(f"{i}\n{_ts(a, ',')} --> {_ts(b, ',')}\n{t}\n" for i, (a, b, t) in enumerate(cues, 1))
     vtt = "WEBVTT\n\n" + "\n".join(f"{_ts(a, '.')} --> {_ts(b, '.')}\n{t}\n" for a, b, t in cues)
@@ -203,7 +209,8 @@ def transcribe(p: TranscribeParams) -> OpResult:
     a = _guarded("transcribe", [p.file_id], f"{stem}.srt", lambda out: out.write_text(srt, encoding="utf-8"))
     b = _guarded("transcribe", [p.file_id], f"{stem}.vtt", lambda out: out.write_text(vtt, encoding="utf-8"))
     return OpResult(outputs=a.outputs + b.outputs,
-                    data={"language": lang, "text": " ".join(s["text"] for s in segments), "captions": len(cues), "words": words[:2000]})
+                    data={"language": lang, "text": " ".join(s["text"] for s in segments), "captions": len(cues), "words": words[:2000],
+                          **({"timing": timing} if timing else {})})
 
 
 def _filter_path(path: Path) -> str:
@@ -321,18 +328,25 @@ class LipsyncParams(BaseModel):
     file_id: str = Field(description="Voice audio (or a video with speech)")
     model: Literal["tiny", "base", "small", "medium", "large-v3"] = "base"
     language: str = Field("en", max_length=8)
+    precise: bool = Field(False, description="Refine word timing with forced alignment (wav2vec2, English) so mouth shapes land on the words")
 
 
 @operation("lipsync", LipsyncParams, "Work out mouth shapes over time for a voice track (Rhubarb-style cues A-H and X) so a 3D or 2D character's mouth moves with the words. Returns a .json cue file.")
 def lipsync(p: LipsyncParams) -> OpResult:
-    segments, words, _ = words_of(p.file_id, p.model, p.language)
+    segments, words, lang = words_of(p.file_id, p.model, p.language)
+    timing = None
+    if p.precise:
+        from .audio_plus import precise_words
+
+        words, timing = precise_words(p.file_id, words, lang)
     duration = media_info(p.file_id)["duration_s"] or (words[-1]["end"] if words else 0)
     cues = mouth_cues(words, duration, "en-gb" if p.language == "en-gb" else "en-us")
-    doc = {"metadata": {"soundFile": _stem(p.file_id), "duration": duration, "generator": "Builder lipsync (Whisper + espeak)"},
+    gen = "Builder lipsync (Whisper + wav2vec2 alignment + espeak)" if timing and timing.get("aligned_words") else "Builder lipsync (Whisper + espeak)"
+    doc = {"metadata": {"soundFile": _stem(p.file_id), "duration": duration, "generator": gen},
            "mouthCues": cues, "words": words}
     return _guarded("lipsync", [p.file_id], f"{_stem(p.file_id)}_mouth.json",
                     lambda out: out.write_text(json.dumps(doc, indent=1), encoding="utf-8"),
-                    data={"cues": len(cues), "duration_s": duration, "text": " ".join(s["text"] for s in segments)})
+                    data={"cues": len(cues), "duration_s": duration, "text": " ".join(s["text"] for s in segments), **({"timing": timing} if timing else {})})
 
 
 # ---------------------------------------------------------------- audio polish
