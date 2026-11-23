@@ -57,6 +57,25 @@ fixed. Add to it at the end of every session (newest lessons at the top of each 
 - The voice list lives in media_backend/voices.py (no imports) to avoid circular imports; op modules
   that need other op modules import them inside functions.
 
+## Where we stopped (resume here)
+
+- Done this session: scene_video with casts, 9 sets, props, camera shots; director, make_anything,
+  style_check; make_film, dub_scene, dub_video (keep_music via Demucs), make_short; review_video,
+  describe_audio; make_character + library + export_character (coach added); export_godot;
+  image_to_3d (TripoSR); Live Talk tab; extras (separate_stems, remove_background, clean_speech,
+  optimize_model); NASA / Smithsonian / Internet Archive sources; docs/free-apps.md; Studio Toolbox
+  links page (https://claude.ai/artifact/Xw2HtK5DPwnaWhjKMVEoFN).
+- Finishing at the end of the session: Studio tab in the web app (scene builder, prop holding) and
+  strand hair / cloth detail for Cycles stills — check their final reports/commits first.
+- The owner's to-do list (set aside until they're ready): Remote Control on their PC, ANTHROPIC_API_KEY
+  in Builder settings (director, make_anything, Live Talk, make_character from words), GPU tools
+  (Real-ESRGAN, RIFE), Freesound key, api.data.gov key (Smithsonian), saved cloud environment,
+  ratings of outputs, a phone video of real movement, approval to run Godot here for export tests.
+- Next ideas they approved in principle: GPU models from docs/free-apps.md top 15 (via their PC or a
+  rented GPU), Kenney / Quaternius imports, nightly test bench, footstep tuning, publishing the
+  updated Talking Teen page.
+- The owner watches usage: stop and pause (commit everything) when they say, or near their limits.
+
 ## Open issues
 
 - Footstep detection found only 2 steps on a short walk: tune the contact threshold.
