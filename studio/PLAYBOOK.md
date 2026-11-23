@@ -62,6 +62,23 @@ fixed. Add to it at the end of every session (newest lessons at the top of each 
 - Morph targets are stored sparse (only moved vertices): 4.7 MB instead of 7.4 MB.
 
 ### Sound
+- Internet Archive "public domain"/CC0 marks are set by uploaders: a 2004 film score came back marked CC0.
+  find_music only trusts Musopen's collection or items dated 1925 or earlier (US recordings rule in 2026).
+  Musopen/Marine Band items also hold instrument parts ("Low Brass"): pick the `source: original` full take.
+- Old 78 rpm recordings: surface crackle counts as note onsets. Measure energy on band-smoothed flux
+  (60 Hz–4 kHz, 32 bands) plus attack contrast; brightness of real recordings is low (marches ~550 Hz).
+- SFX: peak-normalising short clicks to −1 dBFS still gave −0.2 dBTP; normalise on the 4x-oversampled
+  peak, and high-pass *before* normalising (a high-pass after it pushed thuds over 0 dBFS).
+- Crowd voices: breath noise sent through vowel formants sounds dull (laughs had 0% 2–5 kHz); give
+  breath/aspiration its own broad "h" filter. Whooshes centred above 2 kHz read as harsh hiss.
+- enhance_voice: DeepFilterNet at full strength over-gates (gaps 55 dB deep vs 43 in clean speech) and
+  Whisper lost a word; 0.7 plus light de-reverb (0.3) kept the words. Forced-aligned word ends need
+  extending over the still-sounding frames (CTC marks letters with short spikes).
+- DeepFilterNet's io imports torchaudio, which has no build for torch 2.15: audio_plus installs a tiny
+  stand-in module and loads the DFN3 weights from Hugging Face (`fal/DeepFilterNet3`, the GitHub zip is
+  blocked here). `clean_speech` in extras.py still imports df directly and fails without torchaudio.
+- WhisperX pins torch 2.8 + CUDA wheels (GBs): don't install it; audio_plus does the same wav2vec2 CTC
+  alignment in numpy. The disk filled up twice this session: check `df -h /` before big downloads.
 - Kokoro voices: language from the name's first letter (a/b English, e Spanish, f French, i Italian,
   p Portuguese, h Hindi). Whisper checks intelligibility after generating.
 - Mix with loudnorm to −16 LUFS and a −2 dBTP ceiling (a limiter at 0.95 still hit 0 dBTP after AAC).

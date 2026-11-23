@@ -25,6 +25,9 @@ image3d = ["torch>=2.1", "omegaconf>=2.3", "einops>=0.7", "transformers>=4.35", 
 # Local senses: watch_video (Qwen3-VL-2B), caption_audio (CLAP), quality_score (LPIPS + LAION aesthetic), all CPU:
 # pip install "builder[senses]" --extra-index-url https://download.pytorch.org/whl/cpu
 senses = ["torch>=2.4", "torchvision>=0.19", "transformers>=4.57", "lpips>=0.1.4", "huggingface_hub>=0.20", "numpy>=1.26", "pillow>=10"]
+# Precise word timing (wav2vec2 alignment), enhance_voice (DeepFilterNet), CPU:
+# pip install "builder[audio_plus]" --extra-index-url https://download.pytorch.org/whl/cpu   (who_spoke also needs pyannote.audio + HF_TOKEN)
+audio_plus = ["torch>=2.1", "transformers>=4.40", "safetensors>=0.4", "deepfilternet>=0.5.6", "numpy>=1.26"]
 
 [project.scripts]
 media-backend = "media_backend.cli:main"

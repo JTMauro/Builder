@@ -1,6 +1,5 @@
 """`builder bench`: the steps, the dated reports, comparison with the last run, cleanup and the (off by default) schedule."""
 import datetime as dt
-import json
 import subprocess
 import threading
 import time

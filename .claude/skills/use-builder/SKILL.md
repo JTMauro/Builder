@@ -76,6 +76,10 @@ Voice ops: `speak` (Kokoro TTS), `transcribe`, `burn_captions`, `lipsync`, `deno
 `make_ambience` (room tone, rain, forest, city…), `footsteps` (surface + pace or exact `times` from an
 animation), and `audio_check` (LUFS, true peak, clipping, silences; with `expected_text`, a Whisper word match)
 before delivering anything with sound. Mix music or ambience under a video with `replace_audio`.
+More audio (`media_backend/audio_plus.py`): `transcribe`/`lipsync` with `precise=true` (forced-aligned word times),
+`who_spoke` (speaker labels; needs `HF_TOKEN`), `enhance_voice` (noisy/phone recording to studio voice),
+`make_sfx` (original doors, crowds, cars, UI, weather, impacts, swooshes, fanfare, gong; samples in
+`~/.builder/sound_samples/sfx/`) and `find_music` (public-domain music ranked by mood; `use` imports one with its licence).
 
 ## Characters, scenes and films
 
