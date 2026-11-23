@@ -128,3 +128,10 @@ def test_scene_cast_sets_and_shots(stub_speech, stage):  # noqa: F811
     assert calls[0]["voice"] == "af_bella"                                       # the line uses b's voice
     tl = res.data["timeline"]
     assert tl[1]["actor"] == "b" and tl[1]["look"] == "a" and tl[2]["shot"] == {"type": "over", "actor": "a", "target": "b", "move": 1.0}
+
+
+def test_captions_use_script_words():
+    heard = [{"w": "today", "s": 0.0, "e": 0.3}, {"w": "are", "s": 0.3, "e": 0.5}, {"w": "champion", "s": 0.5, "e": 1.0}]
+    assert [w["w"] for w in scene.script_words("Today, our champion", heard)] == ["Today,", "our", "champion"]
+    spread = scene.script_words("Except the beast.", [{"w": "accept", "s": 1.0, "e": 1.4}, {"w": "thebeast", "s": 1.4, "e": 2.0}])
+    assert [w["w"] for w in spread] == ["Except", "the", "beast."] and spread[0]["s"] == 1.0 and spread[-1]["e"] == 2.0

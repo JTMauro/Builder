@@ -93,6 +93,24 @@ class SceneParams(BaseModel):
     tail: float = Field(1.0, ge=0, le=10, description="Seconds to keep rolling after the last beat")
 
 
+def script_words(text: str, heard: list[dict]) -> list[dict]:
+    """Captions show the script's own words (speech recognition mishears: "our" -> "are"), with the heard
+    word timings: matched one to one when the counts agree, otherwise spread over the heard span."""
+    tokens = text.split()
+    if not heard or not tokens:
+        return heard
+    if len(tokens) == len(heard):
+        return [{**h, "w": t} for h, t in zip(heard, tokens)]
+    s0, e0, n = heard[0]["s"], heard[-1]["e"], len(tokens)
+    weights = [max(1, len(t)) for t in tokens]
+    total, acc, out = sum(weights), 0, []
+    for t, wgt in zip(tokens, weights):
+        s = s0 + (e0 - s0) * acc / total
+        acc += wgt
+        out.append({"w": t, "s": round(s, 3), "e": round(s0 + (e0 - s0) * acc / total, 3)})
+    return out
+
+
 def _srt_time(t: float) -> str:
     ms = int(round(t * 1000))
     h, ms = divmod(ms, 3_600_000)
@@ -189,7 +207,7 @@ def build_timeline(p: SceneParams, voiced: bool = True) -> tuple[list[dict], lis
                 polished = run_operation("voice_polish", {"file_id": sp, "style": "podcast"}).outputs[0].id
                 roomed = run_operation("room_reverb", {"file_id": polished, "room": p.room}).outputs[0].id
                 made += [sp, polished, roomed]
-                words = [{"w": x["word"].strip(), "s": round(x["start"], 3), "e": round(x["end"], 3)} for x in cues.get("words", [])]
+                words = script_words(b.say, [{"w": x["word"].strip(), "s": round(x["start"], 3), "e": round(x["end"], 3)} for x in cues.get("words", [])])
                 length, mouth = cues["metadata"]["duration"], [[c["start"], c["value"]] for c in cues["mouthCues"]]
                 voice_tracks.append((roomed, t))
             else:
