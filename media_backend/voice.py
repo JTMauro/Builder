@@ -30,13 +30,10 @@ from .config import NO_WINDOW, get_settings
 from .ops import AUDIO_CODECS, AUDIO_ENC, OpError, OpResult, _ffmpeg, _guarded, _src, _stem, media_info, operation
 
 HF = "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main"
-VOICES = {
-    "am_puck": "US male, young and bright", "am_liam": "US male, warm", "am_michael": "US male, deep",
-    "am_adam": "US male, calm", "am_eric": "US male, clear", "af_heart": "US female, warm (best)", "af_bella": "US female, lively",
-    "af_nicole": "US female, soft", "af_sarah": "US female, clear", "bf_emma": "UK female", "bf_alice": "UK female, bright",
-    "bm_george": "UK male, deep", "bm_daniel": "UK male", "bm_lewis": "UK male, warm",
-}
+from .voices import LANGS, VOICES, voice_lang  # noqa: E402,F401  (the list lives apart so other modules can import it early)
 WHISPER_MODELS = ("tiny", "base", "small", "medium", "large-v3")
+
+
 
 
 def models_dir() -> Path:
@@ -143,7 +140,7 @@ class SpeakParams(BaseModel):
 def speak(p: SpeakParams) -> OpResult:
     import numpy as np
 
-    samples, sr = _kokoro_engine().create(p.text, voice=p.voice, speed=p.speed, lang="en-gb" if p.voice.startswith("b") else "en-us")
+    samples, sr = _kokoro_engine().create(p.text, voice=p.voice, speed=p.speed, lang=voice_lang(p.voice))
     pcm = (np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes()
     base = re.sub(r"_+", "_", re.sub(r"[^A-Za-z0-9_-]+", "_", p.name or "_".join(p.text.split()[:5]))).strip("_")[:60] or "speech"
 

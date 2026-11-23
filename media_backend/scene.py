@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 from .config import NO_WINDOW, get_settings
 from . import storage
 from .ops import AUDIO_ENC, REGISTRY, VIDEO_ENC, OpError, OpResult, _ffmpeg, _guarded, operation, run_operation
-from .voice import VOICES, _filter_path
+from .voices import VOICES
 
 REPO_VIEW = Path(__file__).resolve().parents[1] / "tools" / "makehuman" / "view"
 SPEED = {"walk": 1.15, "run": 3.4}
@@ -182,6 +182,8 @@ def scene_video(p: SceneParams) -> OpResult:
 
             vf += [LOOKS[p.look], "noise=alls=7:allf=t", "vignette=angle=PI/5"]
         if p.captions and lines:
+            from .voice import _filter_path
+
             srt = work / "captions.srt"
             srt.write_text(_captions(lines), encoding="utf-8")
             size = max(14, round(h / 720 * 20))

@@ -20,7 +20,6 @@ from pydantic import BaseModel, Field
 
 from .config import NO_WINDOW, get_settings
 from .ops import OpError, OpResult, _guarded, _src, _stem, media_info, operation
-from .voice import _fetch, models_dir
 
 POSE_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task"
 FACE_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task"
@@ -31,6 +30,8 @@ POINTS = ["nose", "left_eye_inner", "left_eye", "left_eye_outer", "right_eye_inn
 
 
 def _model(name: str, url: str) -> Path:
+    from .voice import _fetch, models_dir
+
     p = models_dir() / "mediapipe" / name
     if not p.exists():
         p.parent.mkdir(parents=True, exist_ok=True)
