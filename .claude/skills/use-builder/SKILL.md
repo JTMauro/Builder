@@ -69,6 +69,14 @@ Sequence with Movie Render Queue, 4K ProRes by default; long, so start with `wai
 for Resolve: *File > Import > Timeline*), `reframe`, and watch folders (`watch_folder_add` with the
 `social` preset on Resolve's render folder). Setup guide: `docs/unreal-metahuman.md`.
 
+## Voices, music and sound
+
+Voice ops: `speak` (Kokoro TTS), `transcribe`, `burn_captions`, `lipsync`, `denoise_audio`, `voice_polish`,
+`room_reverb`. Sound design (free, offline, seeded): `make_music` (original music by mood and length),
+`make_ambience` (room tone, rain, forest, city…), `footsteps` (surface + pace or exact `times` from an
+animation), and `audio_check` (LUFS, true peak, clipping, silences; with `expected_text`, a Whisper word match)
+before delivering anything with sound. Mix music or ambience under a video with `replace_audio`.
+
 ## Free assets for a build
 
 `asset_search` (HDRI skies, textures, models, CC images and sounds; licence and credit in every result),

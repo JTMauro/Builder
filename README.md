@@ -182,6 +182,10 @@ claude mcp add builder -- builder mcp
 | `burn_captions` | Styled captions onto a video (clean, boxed, bold-yellow), from a file or by transcribing first |
 | `lipsync` | Mouth shapes over time for a voice track (Rhubarb-style cues A–H, X) to animate a character's mouth |
 | `denoise_audio`, `voice_polish`, `room_reverb` | Remove background noise; broadcast/podcast/warm/phone/radio voice; place a voice in a room, hall, church… |
+| `make_music` | **Original** background music composed on the spot (free, offline): mood calm/upbeat/tense/sad/epic/playful/lofi, 5–600 s, optional tempo and key, `seed` to repeat it; about -16 LUFS. Never imitates a real song |
+| `make_ambience` | Room tone and backgrounds: room, office, outdoors, city, rain, wind, crowd_murmur, forest (any length, seeded) |
+| `footsteps` | Footsteps on wood, concrete, grass, gravel, carpet, tile or snow; walk/run or `steps_per_s`, a `count` or `length_s`, or exact `times` (an animation's foot contacts) |
+| `audio_check` | Sound QC report (.json): loudness (LUFS) vs a target, true peak, clipping, long silences, DC offset; with `expected_text`, Whisper word match against the script (missing/extra words, WER) |
 | `film_look` | Film grade presets or your own .cube LUT, grain, vignette, cinema bars |
 | `upscale` | 2x/4x (Real-ESRGAN when installed, else sharp Lanczos) |
 | `smooth_motion` | 60 fps or slow motion by in-between frames (RIFE when installed, else ffmpeg) |
