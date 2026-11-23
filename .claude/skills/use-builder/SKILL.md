@@ -148,12 +148,20 @@ those frames and `scene.probe` (times) records each head's screen position in th
 
 `image_to_3d` (TripoSR, MIT, free and local) turns a photo of one object into a .glb (or .obj) with vertex
 colours: `resolution` 128 (quick) / 256 (default), `remove_background`, `foreground_ratio`, `max_faces` to
-slim it for web or games. Slow on CPU (start with `wait=false`); the hidden back is guessed. Needs
-`pip install "builder[image3d]"`; weights (~1.7 GB) download on first use.
+slim it for web or games, `texture=true` to bake the colours into a UV texture (xatlas) for engines. Slow on
+CPU (start with `wait=false`); the hidden back is guessed. Needs `pip install "builder[image3d]"`; weights
+(~1.7 GB) download on first use. `bake_texture` does the texture bake for any vertex-coloured model.
+
+`rig_model` gives a standing humanoid (image_to_3d result, pack character, any GLB/FBX/OBJ) a Mixamo-named
+skeleton (same names as the MakeHuman rig) with Blender automatic weights, so anim.js `retarget()` and the CMU
+moves play on it; it returns a walking preview PNG. `stage_prop` puts any model on a studio stage as
+`props/<id>/<id>_1k.gltf` at real-world size (`height_m` or `length_m`).
 
 ## Free assets for a build
 
 `asset_search` (HDRI skies, textures, models, CC images and sounds; licence and credit in every result),
 then `asset_import` with the result's `source` and `id` (credit saved in `license.json`), and
 `page_references` to gather look references from one page. Prefer CC0; keep the attribution for CC BY.
+Low-poly game models: `source=kenney` or `quaternius` (CC0 packs; `asset_import` with `item="barrel, sword"`
+pulls single GLBs out of the pack, no item lists its models) and `polypizza` (needs `POLY_PIZZA_API_KEY`).
 

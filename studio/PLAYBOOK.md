@@ -68,6 +68,26 @@ fixed. Add to it at the end of every session (newest lessons at the top of each 
 - faster-whisper + PyAV fails on some files: decode with ffmpeg to 16 kHz float PCM first.
 - MediaPipe on Linux needs `libegl1 libgles2`.
 
+### 3D assets, rigging and textures (asset packs, rig_model, bake_texture, stage_prop)
+- Kenney has no API: the download button calls kenney.nl/download-link/<hex of "assets/<slug>"> (needs the
+  pack page as Referer) and answers a signed zip link. Its GLBs point at `Textures/colormap.png` outside the
+  file: pack them (glbtools.pack_glb) before use. curl's default user agent gets 403; a named one works.
+- Quaternius: Google Drive answers "Quota exceeded" to server downloads and the new megakits are itch.io only;
+  his own OpenGameArt uploads (author quaternius, CC0) are plain zips. Megakit textures live in a shared
+  `Textures/` folder (prefer the top-level normals, not `Normals-UnrealEngine`) and are 2-4K, so one barrel GLB
+  is 14 MB: stage_prop shrinks textures to 1024 (→ ~0.9 MB).
+- Old Quaternius FBX files read back invisible (material alpha 0) and lose colours (plain 0.8 grey) or their
+  texture link: convert.py makes them opaque, colours materials named after a colour ("Red", "DarkWood") and
+  links a texture named like the material. Check every converted model with tools/model3d/glbshot.cjs.
+- Poly Pizza: API key needed (free account); static.poly.pizza answers 403 to this container (Cloudflare).
+- rig_model works on human-proportioned bodies (Quaternius RPG warrior: walks and waves with Xbot and CMU
+  clips). Big-head/block-arm minis (Kenney mini-characters) fit badly; they already ship their own rig and
+  moves, use those. UniRig needs CUDA-only packages: not usable on this CPU box.
+- Blender scripts print their JSON line before Blender's own exit messages: read the last line that starts
+  with "{", not the last line.
+- Vertex colours (glTF COLOR_0) are linear, so TripoSR's vertex-coloured GLBs render darker in three.js than
+  the photo; the baked texture (sRGB) shows the intended colours.
+
 ### Python package
 - The voice list lives in media_backend/voices.py (no imports) to avoid circular imports; op modules
   that need other op modules import them inside functions.
@@ -132,6 +152,8 @@ lines, characters, stage, renders). Refresh them at the end of big sessions (con
 
 ## Open issues
 
+- Gladiator arena props are on the teen stage (props/arena_*, gladiator_*, training_dummy, all CC0) but
+  studio.html has no GRIP entries for them yet (sword/spear/axe/shield/helmet use the default grip).
 - BUG: all characters share ~/.builder/makehuman/mhtex, so building a new one (e.g. friend) changes
   older .blend characters' hair/shirt/eye colours in Cycles stills. Fix: per-character texture
   folders in gen.py / run_job.py. (Stage .json models embed their textures and are not affected.)

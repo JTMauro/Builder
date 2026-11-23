@@ -69,7 +69,7 @@ FLUX.2, Qwen-Image, Wan, SeedVR2 and LatentSync, so adding a model is mostly a w
 | Name | What it adds here | Licence | Size | HW | Maturity | Pri |
 |---|---|---|---|---|---|---|
 | glTF-Transform / gltfpack | Compress and optimise GLB for stages and Craft (see Top 15) | MIT (repo) | ~50 MB | CPU | Stable, active | H |
-| xatlas (`xatlas-python`) | Proper UV unwraps for TripoSR vertex-colour meshes, so colours can be baked to textures | MIT (repo) | <5 MB | CPU | Stable | M |
+| xatlas (`xatlas-python`) | Proper UV unwraps for TripoSR vertex-colour meshes, so colours can be baked to textures. **In use**: `image_to_3d texture=true`, `bake_texture` | MIT (repo) | <5 MB | CPU | Stable | M |
 | PyMeshLab | Mesh repair, hole filling, decimation and remeshing in Python | GPL-3.0 (repo) | ~100 MB | CPU | Stable | M |
 | Instant Meshes | Quad retopology from the command line for generated meshes | BSD-3 (repo) | ~5 MB | CPU | Old but stable | M |
 | QRemeshify (Blender add-on, QuadWild) | Cleaner quads inside headless Blender | GPL-3.0 (repo) | ~20 MB | CPU | Active | L |
@@ -106,7 +106,7 @@ FLUX.2, Qwen-Image, Wan, SeedVR2 and LatentSync, so adding a model is mostly a w
 
 | Name | What it adds here | Licence | Size | HW | Maturity | Pri |
 |---|---|---|---|---|---|---|
-| UniRig | Auto-rig any mesh (see Top 15) | MIT (repo, HF) | 1–2 GB | GPU 8–12 GB | SIGGRAPH '25 | H |
+| UniRig | Auto-rig any mesh (see Top 15). CPU checked Nov 2026: not practical (needs CUDA builds of spconv, torch_scatter/cluster and flash_attn; README states an 8 GB CUDA GPU; joint names would still need mapping to Mixamo). Builder's `rig_model` fits a Mixamo skeleton from the mesh's shape in Blender instead (humanoids only) | MIT (repo, HF) | 1–2 GB | GPU 8–12 GB | SIGGRAPH '25 | H |
 | SkinTokens | UniRig's successor (rig plus skinning in one model) | **Not yet confirmed**: check before use [paper](https://www.arxiv.org/pdf/2602.04805) | – | GPU | New (Feb 2026) | Watch |
 | Rigify (built into Blender) | Animator-friendly control rigs on MPFB bodies | GPL | – | CPU | Stable | M |
 | Mixamo | Free auto-rig plus a large animation library | Free with an **Adobe ID (account)**; maintenance mode; humanoids only [FAQ](https://helpx.adobe.com/creative-cloud/faq/mixamo-faq.html) | web | – | Ageing, not end-of-life | L |
@@ -260,8 +260,9 @@ Use lip-sync on real people only with consent (bible rule).
 |---|---|---|---|---|---|---|
 | Godot 4.7 | See Top 15 | MIT | ~150 MB | CPU | Very active | H |
 | Phaser 3/4 | Web 2D games, the natural Craft page target | MIT (repo) | npm | Browser | Active | M |
-| Kenney game assets | Thousands of CC0 2D/3D/UI/audio assets; add as an `asset_search` source | CC0 | varies | – | Active | M |
-| Quaternius models | CC0 low-poly characters, already rigged and animated | CC0 | varies | – | Active | M |
+| Kenney game assets | Thousands of CC0 2D/3D/UI/audio assets. **Added** as `asset_search`/`asset_import` source `kenney` (3D packs; the site's own download link, GLB inside) | CC0 | varies | – | Active | M |
+| Quaternius models | CC0 low-poly characters, already rigged and animated. **Added** as source `quaternius` (his own OpenGameArt uploads: Google Drive refuses server downloads, itch.io has no plain link) | CC0 | varies | – | Active | M |
+| Poly Pizza | Thousands of single low-poly models (many Kenney/Quaternius), CC0 or CC BY. **Added** as source `polypizza`: API needs a free key (`POLY_PIZZA_API_KEY`); its file CDN blocks many cloud IPs | CC0 / CC BY 3.0 per model | – | – | Active | M |
 | Godot MCP servers (community) | Let Claude run, inspect and debug a Godot project | MIT (various, check each) | small | – | Young | L |
 | Blender MCP (`mcp-for-blender`) | Interactive Blender control for Claude Code; Builder already runs Blender headless, so only needed for live sessions | MIT, third-party (not by Blender) [src](https://github.com/ahujasid/blender-mcp) | small | – | Popular | L |
 

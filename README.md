@@ -213,9 +213,12 @@ claude mcp add builder -- builder mcp
 | `film_look` | Film grade presets or your own .cube LUT, grain, vignette, cinema bars |
 | `upscale` | 2x/4x (Real-ESRGAN when installed, else sharp Lanczos) |
 | `smooth_motion` | 60 fps or slow motion by in-between frames (RIFE when installed, else ffmpeg) |
-| `image_to_3d` | A picture of one object to a 3D model (.glb/.obj, vertex colours) with TripoSR (MIT, free, local): background removal, marching cubes `resolution` 128–512, optional `max_faces`; 1–2 min on CPU, first use downloads ~1.9 GB; needs `pip install "builder[image3d]"` |
-| `asset_search` | Free, licensed assets for builds: HDRI skies, PBR textures and 3D models (Poly Haven, ambientCG; CC0), Creative Commons images and sounds (Openverse), sound effects (Freesound with `FREESOUND_API_KEY`) |
-| `asset_import` | Download a found asset (or a direct link) into the library; its licence and credit line are saved in `license.json` beside it |
+| `image_to_3d` | A picture of one object to a 3D model (.glb/.obj, vertex colours) with TripoSR (MIT, free, local): background removal, marching cubes `resolution` 128–512, optional `max_faces`, `texture=true` bakes a UV texture (xatlas); 1–2 min on CPU, first use downloads ~1.9 GB; needs `pip install "builder[image3d]"` |
+| `bake_texture` | A vertex-coloured model to a textured GLB: xatlas UV unwrap, colours baked to a JPEG texture, optional `max_faces` first (seconds, CPU) |
+| `rig_model` | Adds a Mixamo-named skeleton (like the MakeHuman rig) to a standing humanoid mesh and skins it with Blender automatic weights, so three.js stages can play walk/run and CMU moves on it; returns a walking preview |
+| `stage_prop` | Puts a model on a studio stage as `props/<id>/<id>_1k.gltf` at real-world size (`height_m`/`length_m`), textures shrunk, licence kept, listed in `props/index.json` |
+| `asset_search` | Free, licensed assets for builds: HDRI skies, PBR textures and 3D models (Poly Haven, ambientCG; CC0), Creative Commons images and sounds (Openverse), sound effects (Freesound with `FREESOUND_API_KEY`), low-poly game models (Kenney and Quaternius packs, CC0; Poly Pizza with `POLY_PIZZA_API_KEY`) |
+| `asset_import` | Download a found asset (or a direct link) into the library; its licence and credit line are saved in `license.json` beside it. Kenney/Quaternius: `item="barrel, sword"` takes single models out of the pack as GLB (FBX/OBJ converted with Blender) |
 | `page_references` | Collect the images on one web page as look references |
 | `unreal_status` | Finds Unreal Engine and your projects, and lists plugins a render still needs |
 | `unreal_render` | Renders an Unreal Level Sequence (MetaHumans included) with Movie Render Queue, 4K by default, to ProRes / H.265 / H.264 |

@@ -1,5 +1,4 @@
 """rig_model (Blender replaced by a stand-in) and bake_texture (real xatlas, tiny mesh)."""
-import json
 import struct
 from pathlib import Path
 
