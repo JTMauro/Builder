@@ -8,7 +8,7 @@ from pathlib import Path
 stage, scene_path, out = sys.argv[1:4]
 scene = json.loads(Path(scene_path).read_text(encoding="utf-8"))
 w, h, n = scene["width"], scene["height"], round(scene["duration"] * scene["fps"])
-assert (Path(stage) / "index.html").exists()
+assert (Path(stage) / scene.get("page", "index.html")).exists()
 raw = b"".join(b"\0" + b"\x80\x80\x80" * w for _ in range(h))
 
 

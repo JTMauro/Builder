@@ -103,3 +103,28 @@ def test_captions_never_overlap():
     srt = scene._captions([{"t": 1.0, "words": [{"w": f"w{i}", "s": i * 0.3, "e": i * 0.3 + 0.28} for i in range(15)]}])
     times = [ln.split(" --> ") for ln in srt.splitlines() if " --> " in ln]
     assert len(times) == 3 and all(times[i][1] < times[i + 1][0] for i in range(2))
+
+
+def test_scene_cast_sets_and_shots(stub_speech, stage):  # noqa: F811
+    pytest.importorskip("numpy")
+    beats = [{"shot": {"type": "wide"}}, {"actor": "b", "say": "Hi!", "look": "a"}, {"actor": "a", "move": "wave", "shot": {"type": "over", "actor": "a", "target": "b", "move": 1}}]
+    cast = [{"id": "a", "model": "teen", "voice": "am_puck"}, {"id": "b", "model": "friend", "voice": "af_bella", "at": [1, 0], "face": -30}]
+    with pytest.raises(ops.OpError, match="no studio page"):
+        ops.run_operation("scene_video", {"stage": "kid", "resolution": "640x360", "fps": 12, "cast": cast, "beats": beats})
+    (stage / "studio.html").write_text("<title>studio</title>")
+    with pytest.raises(ops.OpError, match="no set called 'park'"):
+        ops.run_operation("scene_video", {"stage": "kid", "resolution": "640x360", "fps": 12, "cast": cast, "set": "park", "beats": beats})
+    (stage / "sets" / "park").mkdir(parents=True)
+    (stage / "sets" / "park" / "set.json").write_text("{}")
+    calls = []
+    real = ops.run_operation
+    monkey_speak = lambda name, params: (calls.append(params) if name == "speak" else None, real(name, params))[1]  # noqa: E731
+    import media_backend.scene as sc
+    sc.run_operation = monkey_speak
+    try:
+        res = ops.run_operation("scene_video", {"stage": "kid", "resolution": "640x360", "fps": 12, "cast": cast, "set": "park", "quality": "fast", "beats": beats})
+    finally:
+        sc.run_operation = real
+    assert calls[0]["voice"] == "af_bella"                                       # the line uses b's voice
+    tl = res.data["timeline"]
+    assert tl[1]["actor"] == "b" and tl[1]["look"] == "a" and tl[2]["shot"] == {"type": "over", "actor": "a", "target": "b", "move": 1.0}

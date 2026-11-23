@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Builder Studio</title>
+<style>
+/* the studio stage: one full-window canvas; Builder's scene_video drives it frame by frame */
+:root{--bg:#1a1d20;--fg:#e8ecee}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px system-ui,sans-serif;overflow:hidden}
+#stage{position:fixed;inset:0}#stage canvas{display:block;width:100%;height:100%}
+#status{position:fixed;left:12px;bottom:10px;opacity:.75}
+</style></head><body>
+<div id="stage"></div><div id="status">Loading…</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+// Builder Studio: several characters on a set, with camera shots and cuts.
+// Scene (window.__scene, injected by Builder's scene_video):
+// { width, height, fps, duration, set: "park" | null, quality: "film" | "fast",
+//   cast: [{ id, model: "teen", at: [x, z], face: deg }],
+//   lines: [{ key, cues: [[t, shape]], words, duration }],
+//   beats: [{ t, actor?, say?, move?, walkTo?, run?, face?, look?: "camera" | actorId,
+//             shot?: { type: "wide" | "two" | "close" | "medium" | "over", actor?, target?, move?: seconds } }] }
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GroundProjectedSkybox } from "three/addons/objects/GroundProjectedSkybox.js";
+import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { BokehPass } from "three/addons/postprocessing/BokehPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { retarget, gestures, CMU } from "./anim.js";
+
+const DEMO = {   // what the page plays when opened on its own
+  set: "park", fps: 30, duration: 14,
+  cast: [{ id: "a", model: "teen", at: [-0.7, 0], face: 35 }, { id: "b", model: "friend", at: [0.7, 0], face: -35 }],
+  lines: [], beats: [
+    { t: 0, shot: { type: "wide" } }, { t: 0.5, actor: "a", move: "wave", look: "b" }, { t: 0.6, actor: "b", look: "a" },
+    { t: 2.5, shot: { type: "over", actor: "a", target: "b" } }, { t: 3, actor: "b", move: "laugh" },
+    { t: 6, shot: { type: "close", actor: "a", move: 1.5 } }, { t: 6.2, actor: "a", move: "shrug" },
+    { t: 9, shot: { type: "two" } }, { t: 9.3, actor: "b", move: "dance" }, { t: 9.3, actor: "a", move: "agree" }],
+};
+const SCENE = window.__scene || null, S = SCENE || DEMO, live = !SCENE;
+const $ = s => document.querySelector(s), status = $("#status");
+const V = THREE.Vector3, Q = THREE.Quaternion, tmpV = new V();
+
+const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: !!SCENE });
+r.setPixelRatio(SCENE ? 1 : Math.min(devicePixelRatio, 2)); r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 0.9;
+r.outputColorSpace = THREE.SRGBColorSpace; r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
+$("#stage").append(r.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xdfe2e4);
+const cam = new THREE.PerspectiveCamera(35, 16 / 9, 0.05, 300); cam.position.set(0, 1.5, 5);
+const ctl = live ? new OrbitControls(cam, r.domElement) : null; if (ctl) { ctl.target.set(0, 1, 0); ctl.enableDamping = true; }
+const key = new THREE.DirectionalLight(0xfff0dc, 2.0); key.castShadow = true;
+Object.assign(key.shadow.camera, { left: -4, right: 4, top: 4, bottom: -2, near: 0.5, far: 20 }); key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0004; key.shadow.normalBias = 0.02;
+key.position.set(2.5, 5, 3.5); scene.add(key, key.target);
+const hemi = new THREE.HemisphereLight(0xe6eeff, 0x6f665c, 0.3); scene.add(hemi);
+
+// post: ambient occlusion, bloom, depth of field, tone map, grade + grain
+const composer = new EffectComposer(r); composer.addPass(new RenderPass(scene, cam));
+const fast = S.quality === "fast";
+if (!fast) { const ao = new GTAOPass(scene, cam, 800, 450); ao.blendIntensity = 0.8; ao.updateGtaoMaterial({ radius: 0.25, distanceExponent: 1.4, thickness: 1.2, scale: 1.1, samples: 16 }); composer.addPass(ao); }
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(800, 450), 0.1, 0.5, 0.92));
+const bokeh = new BokehPass(scene, cam, { focus: 4, aperture: 0.0008, maxblur: 0.006 }); composer.addPass(bokeh);
+composer.addPass(new OutputPass());
+const grade = new ShaderPass({ uniforms: { tDiffuse: { value: null }, t: { value: 0 }, res: { value: new THREE.Vector2(1, 1) } },
+  vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float t; uniform vec2 res; varying vec2 vUv;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    void main(){ vec3 c = texture2D(tDiffuse, vUv).rgb; float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      c += mix(vec3(-0.012, 0.0, 0.018), vec3(0.018, 0.006, -0.012), smoothstep(0.15, 0.75, l)); c = (c - 0.5) * 1.04 + 0.5;
+      vec2 q = vUv - 0.5; c *= 1.0 - dot(q, q) * 0.4; c += (h(floor(vUv * res) + fract(t) * 91.7) - 0.5) * 0.03 * (1.0 - l * 0.6);
+      gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0); }` });
+composer.addPass(grade);
+function size() { const w = innerWidth, h = innerHeight; r.setSize(w, h, false); composer.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); grade.uniforms.res.value.set(w, h); }
+addEventListener("resize", size); size();
+
+// loading helpers (.json = one-file glTF from glb2json.py)
+const loader = new GLTFLoader();
+loader.register(p => { p.textureLoader = new THREE.TextureLoader(p.options.manager); return { name: "img_textures" }; });
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const getJSON = async u => { const res = await fetch(u); if (!res.ok) throw new Error(u + " returned " + res.status); return res.json(); };
+const parseGLB = bytes => new Promise((ok, bad) => loader.parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), "", ok, bad));
+async function loadGltfJson(url) {
+  const json = await getJSON(url); const uri = json.buffers[0].uri; delete json.buffers[0].uri;
+  const bin = b64(uri.slice(uri.indexOf(",") + 1)); json.buffers[0].byteLength = bin.length;
+  const js = new TextEncoder().encode(JSON.stringify(json)), jl = (js.length + 3) & ~3, bl = (bin.length + 3) & ~3;
+  const out = new Uint8Array(28 + jl + bl), dv = new DataView(out.buffer);
+  dv.setUint32(0, 0x46546C67, true); dv.setUint32(4, 2, true); dv.setUint32(8, out.length, true);
+  dv.setUint32(12, jl, true); dv.setUint32(16, 0x4E4F534A, true); out.fill(0x20, 20, 20 + jl); out.set(js, 20);
+  dv.setUint32(20 + jl, bl, true); dv.setUint32(24 + jl, 0x004E4942, true); out.set(bin, 28 + jl);
+  return parseGLB(out);
+}
+
+// ---------- the set: surroundings + light from an HDRI, props, a floor that only shows shadows
+async function buildSet() {
+  const pm = new THREE.PMREMGenerator(r);
+  if (S.set) {
+    const base = `sets/${S.set}/`, spec = await getJSON(base + "set.json");
+    const sky = await new RGBELoader().loadAsync(base + spec.sky); sky.mapping = THREE.EquirectangularReflectionMapping;
+    scene.environment = pm.fromEquirectangular(sky).texture;
+    const dome = new GroundProjectedSkybox(sky); dome.scale.setScalar(spec.ground.radius); dome.height = spec.ground.height; dome.radius = spec.ground.radius; scene.add(dome);
+    scene.background = null; r.toneMappingExposure = 0.9 * (spec.exposure || 1); hemi.intensity = 0.15; key.intensity = 1.6;
+    const catcher = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.ShadowMaterial({ opacity: 0.38 }));
+    catcher.rotation.x = -Math.PI / 2; catcher.position.y = 0.002; catcher.receiveShadow = true; scene.add(catcher);
+    for (const p of spec.props) {
+      const g = await loader.loadAsync(base + p.file);
+      g.scene.position.set(p.at[0], 0, p.at[1]); g.scene.rotation.y = (p.rot || 0) * Math.PI / 180; g.scene.scale.setScalar(p.scale || 1);
+      g.scene.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } }); scene.add(g.scene);
+    }
+    return spec.credit;
+  }
+  const light = await getJSON("models/light.json");
+  const hdr = new RGBELoader().parse(b64(light.hdr).buffer);
+  const tex = new THREE.DataTexture(hdr.data, hdr.width, hdr.height, THREE.RGBAFormat, hdr.type); tex.mapping = THREE.EquirectangularReflectionMapping; tex.flipY = true; tex.needsUpdate = true;
+  scene.environment = pm.fromEquirectangular(tex).texture;
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(14, 72), new THREE.MeshStandardMaterial({ color: 0xcfd3d6, roughness: 0.92 }));
+  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor); scene.fog = new THREE.Fog(0xdfe2e4, 9, 22);
+  return "";
+}
+
+// ---------- characters: each model loads once (moves are retargeted once per model), each actor is a clone
+const LOOPS = new Set(["idle", "walk", "run"]), SPEED = { walk: 1.15, run: 3.4 };
+const CMU_OPTS = { rename: CMU, neck: -0.08, head: -0.14 };
+const models = {};
+async function loadModel(name, bot, cmu) {
+  if (models[name]) return models[name];
+  const g = await loadGltfJson(`models/${name}.json`), root = g.scene;
+  root.traverse(o => {
+    if (!o.isMesh) return; o.castShadow = o.receiveShadow = true; o.frustumCulled = false;
+    const m = o.material, n = m?.name || "";
+    if (/brow|lash|hair/i.test(n)) { m.alphaTest = 0.2; m.transparent = false; if (/hair/i.test(n)) { m.side = THREE.FrontSide; o.receiveShadow = false; } }
+    if (n === "Skin") o.material = new THREE.MeshPhysicalMaterial({ map: m.map, normalMap: m.normalMap, roughness: 0.6, sheen: 0.35, sheenColor: new THREE.Color(0xffc4b0), sheenRoughness: 0.55, specularIntensity: 0.45, envMapIntensity: 0.7, name: n });
+    else if (n === "Eye") o.material = new THREE.MeshPhysicalMaterial({ map: m.map, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.04, name: n });
+  });
+  const clips = retarget(bot.scene, bot.animations.filter(c => ["idle", "walk", "run", "agree", "headShake"].includes(c.name)), root);
+  for (const [label, data] of Object.entries(cmu.glb)) { const cg = await parseGLB(b64(data)); const c = cg.animations[0]; c.name = label; clips.push(...retarget(cg.scene, [c], root, CMU_OPTS)); }
+  const mixer = new THREE.AnimationMixer(root), idle = clips.find(c => c.name === "idle");
+  mixer.clipAction(idle).play(); mixer.setTime(0); root.updateMatrixWorld(true);
+  const pose0 = new Map(); root.traverse(o => { if (o.isBone) pose0.set(o, o.quaternion.clone()); });
+  mixer.stopAllAction(); mixer.uncacheRoot(root);
+  clips.push(...gestures(root, pose0, idle));
+  return (models[name] = { root, clips, name });
+}
+let moreIndex = null;
+async function extraClip(model, label) {
+  if (model.clips.some(c => c.name === label)) return;
+  moreIndex = moreIndex || await getJSON("clips/cmu/index.json").catch(() => ({}));
+  if (!moreIndex[label]) return;
+  const d = await getJSON("clips/cmu/" + moreIndex[label]); const cg = await parseGLB(b64(d.glb)); const c = cg.animations[0]; c.name = label;
+  model.clips.push(...retarget(cg.scene, [c], model.root, CMU_OPTS));
+}
+
+const actors = {};
+function makeActor(spec, model) {
+  const root = SkeletonUtils.clone(model.root), group = new THREE.Group(); group.add(root); scene.add(group);
+  group.position.set(spec.at?.[0] || 0, 0, spec.at?.[1] || 0); group.rotation.y = (spec.face || 0) * Math.PI / 180;
+  const bones = {}, morphs = [];
+  root.traverse(o => {
+    if (o.isBone) for (const n of ["Hips", "Spine1", "Spine2", "Neck", "Head", "LeftFoot", "RightFoot"]) if (o.name.endsWith(n) && !bones[n]) bones[n] = o;
+    if (o.isMesh && o.morphTargetDictionary) { o.morphTargetInfluences = o.morphTargetInfluences.slice(); morphs.push(o); }
+  });
+  const a = { id: spec.id, model, group, root, bones, morphs, mixer: new THREE.AnimationMixer(root), acts: {}, current: null, base: "idle",
+    target: null, speaking: null, face: {}, blinkAt: 1 + Math.random() * 2, blinkT: -1, brows: 0, look: "camera", lookW: 0,
+    feet: { L: { lo: 9, up: true }, R: { lo: 9, up: true } }, headFwd: new V(0, 0, 1), seed: Math.random() * 10 };
+  a.mixer.addEventListener("finished", e => { if (e.action === a.current && !LOOPS.has(a.current._name)) play(a, a.base); });
+  // the head's forward direction in its own space, from the rest pose facing +Z
+  group.updateMatrixWorld(true); const gq = group.quaternion.clone(); group.quaternion.identity(); group.updateMatrixWorld(true);
+  a.headFwd.set(0, 0, 1).applyQuaternion(bones.Head.getWorldQuaternion(new Q()).invert()); group.quaternion.copy(gq); group.updateMatrixWorld(true);
+  play(a, "idle", 0);
+  return (actors[spec.id] = a);
+}
+function action(a, name) {
+  if (a.acts[name]) return a.acts[name];
+  const clip = a.model.clips.find(c => c.name === name); if (!clip) return null;
+  const act = a.mixer.clipAction(clip); act._name = name; if (!LOOPS.has(name)) { act.setLoop(THREE.LoopOnce, 1); act.clampWhenFinished = true; }
+  return (a.acts[name] = act);
+}
+function play(a, name, fade = 0.3) {
+  const next = action(a, name); if (!next) return;
+  if (next === a.current) { if (!LOOPS.has(name)) next.reset().play(); return; }
+  next.reset().setEffectiveWeight(1).fadeIn(fade).play(); if (a.current) a.current.fadeOut(fade); a.current = next;
+}
+
+// ---------- face: lip-sync from cues, blinks, smile, brows
+const VIS = ["A", "B", "C", "D", "E", "F", "G", "H"];
+function setMorph(a, n, v) { for (const m of a.morphs) { const i = m.morphTargetDictionary[n]; if (i !== undefined) m.morphTargetInfluences[i] = v; } }
+function face(a, dt, t) {
+  const want = {}; for (const v of VIS) want["viseme_" + v] = 0;
+  if (a.speaking) {
+    const now = t - a.speaking.t0, cues = a.speaking.l.cues;
+    if (now > a.speaking.l.duration + 0.2) a.speaking = null;
+    else { let k = 0; while (k + 1 < cues.length && cues[k + 1][0] <= now + 0.04) k++; const s = cues[k]?.[1]; if (s && s !== "X") want["viseme_" + s] = s === "A" ? 0.9 : 1; }
+  }
+  if (t > a.blinkAt && a.blinkT < 0) { a.blinkT = 0; a.blinkAt = t + 2 + Math.random() * 3.5; }
+  let blink = 0; if (a.blinkT >= 0) { a.blinkT += dt; const p = a.blinkT / 0.16; blink = p < 0.45 ? p / 0.45 : Math.max(0, 1 - (p - 0.45) / 0.55); if (p >= 1) a.blinkT = -1; }
+  want.blink_L = want.blink_R = blink; want.smile = a.speaking ? 0.12 : 0.26;
+  a.brows = Math.max(0, a.brows - dt * 1.4); want.brows_up = Math.sin(Math.min(1, a.brows) * Math.PI) * 0.5;
+  for (const [n, v] of Object.entries(want)) { const k = n.startsWith("blink") ? 1 : Math.min(1, dt * (n.startsWith("viseme") ? 22 : 6)); a.face[n] = (a.face[n] ?? 0) + (v - (a.face[n] ?? 0)) * k; setMorph(a, n, a.face[n]); }
+}
+
+// ---------- body: breathing, head turns to whoever they're looking at, walking, foot contacts
+const xAx = new V(1, 0, 0), events = [];
+const headPos = a => a.bones.Head.getWorldPosition(new V()).add(new V(0, 0.05, 0));
+function body(a, dt, t) {
+  const br = Math.sin((t + a.seed) * 2 * Math.PI / 4.2);
+  a.bones.Spine1.quaternion.multiply(new Q().setFromAxisAngle(xAx, -br * 0.008));
+  a.bones.Spine2.quaternion.multiply(new Q().setFromAxisAngle(xAx, -br * 0.012));
+  a.root.updateMatrixWorld(true);
+  // walking towards a target
+  if (a.target) {
+    tmpV.copy(a.target).sub(a.group.position); tmpV.y = 0;
+    if (tmpV.length() < 0.1) { a.target = null; a.base = "idle"; play(a, "idle"); }
+    else { const d = tmpV.normalize(), want = Math.atan2(d.x, d.z); let dd = want - a.group.rotation.y; dd = Math.atan2(Math.sin(dd), Math.cos(dd));
+      a.group.rotation.y += dd * Math.min(1, dt * 8); a.group.position.addScaledVector(d, SPEED[a.base] * dt); a.group.updateMatrixWorld(true); }
+  }
+  // head look
+  const okMove = a.current && !["run", "jump", "dance", "kick", "pickup", "bow", "stretch", "sit"].includes(a.current._name) && !a.target;
+  a.lookW += ((okMove ? 1 : 0) - a.lookW) * Math.min(1, dt * 3);
+  if (a.lookW > 0.01) {
+    const goal = a.look === "camera" ? cam.position.clone() : actors[a.look] ? headPos(actors[a.look]) : null;
+    if (goal) {
+      const head = a.bones.Head, hp = head.getWorldPosition(new V());
+      const dirB = goal.sub(hp).applyQuaternion(a.group.quaternion.clone().invert()).normalize();
+      const yaw = THREE.MathUtils.clamp(Math.atan2(dirB.x, dirB.z), -1.0, 1.0), pitch = THREE.MathUtils.clamp(Math.asin(THREE.MathUtils.clamp(dirB.y, -1, 1)), -0.35, 0.3);
+      const desired = new V(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).applyQuaternion(a.group.quaternion);
+      const fw = a.headFwd.clone().applyQuaternion(head.getWorldQuaternion(new Q()));
+      const step = new Q().slerp(new Q().setFromUnitVectors(fw, desired), a.lookW * 0.8);
+      for (const [bone, share] of [[a.bones.Neck, 0.4], [head, 0.6]]) {
+        const part = new Q().slerp(step, share), wq = bone.getWorldQuaternion(new Q()), pq = bone.parent.getWorldQuaternion(new Q());
+        bone.quaternion.copy(pq.invert().multiply(part.multiply(wq))); bone.updateMatrixWorld(true);
+      }
+    }
+  }
+  // foot contacts (for footstep sounds)
+  const moving = a.current && ["walk", "run", "jump", "dance"].includes(a.current._name) || a.target;
+  for (const k of ["L", "R"]) {
+    const f = a.feet[k], y = a.bones[k === "L" ? "LeftFoot" : "RightFoot"].getWorldPosition(tmpV).y;
+    f.lo = Math.min(f.lo + dt * 0.02, y);
+    if (f.up && y < f.lo + 0.015) { f.up = false; if (moving) events.push({ t: +simT.toFixed(3), step: k, actor: a.id, pace: a.base }); }
+    else if (!f.up && y > f.lo + 0.035) f.up = true;
+  }
+}
+
+// ---------- camera shots
+let shot = { type: "wide" }, shotFrom = null, shotT0 = 0;
+function shotPose(s) {
+  const list = Object.values(actors), A = actors[s.actor] || list[0], B = actors[s.target] || list.find(x => x !== A) || A;
+  const heads = list.map(headPos), c = heads.reduce((p, h) => p.add(h), new V()).multiplyScalar(1 / Math.max(1, heads.length));
+  const fwdOf = a => new V(0, 0, 1).applyQuaternion(a.group.quaternion);
+  if (s.type === "close" || s.type === "medium") {
+    const h = headPos(A), f = fwdOf(A), side = new V(f.z, 0, -f.x), d = s.type === "close" ? 0.95 : 2.0;
+    const at = s.type === "close" ? h : h.clone().add(new V(0, -0.35, 0));
+    return { pos: at.clone().addScaledVector(f, d).addScaledVector(side, d * 0.18).add(new V(0, 0.03, 0)), at, focus: h };
+  }
+  if (s.type === "over") {   // over A's shoulder, looking at B
+    const ha = headPos(A), hb = headPos(B), dir = hb.clone().sub(ha).setY(0).normalize(), side = new V(dir.z, 0, -dir.x);
+    return { pos: ha.clone().addScaledVector(dir, -1.25).addScaledVector(side, 0.55).add(new V(0, 0.02, 0)), at: hb.clone().add(new V(0, -0.12, 0)), focus: hb };
+  }
+  // wide / two: frame everyone from in front of the group
+  let spread = 0; for (const h of heads) spread = Math.max(spread, h.distanceTo(c));
+  const f = list.reduce((p, a) => p.add(fwdOf(a)), new V()).setY(0); if (f.length() < 0.2) f.set(0, 0, 1); f.normalize();
+  const d = (s.type === "two" ? 2.6 : 4.4) + spread * (s.type === "two" ? 1.6 : 2.2), at = new V(c.x, s.type === "two" ? c.y - 0.25 : 0.95, c.z);
+  return { pos: at.clone().addScaledVector(f, d).add(new V(0, s.type === "two" ? 0.05 : 0.55, 0)), at, focus: c };
+}
+const ease = x => x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+function camera(t) {
+  const want = shotPose(shot);
+  if (shotFrom && shot.move > 0) { const k = ease(Math.min(1, (t - shotT0) / shot.move)); want.pos.lerpVectors(shotFrom.pos, want.pos, k); want.at.lerpVectors(shotFrom.at, want.at, k); if (k >= 1) shotFrom = null; }
+  cam.position.copy(want.pos); cam.lookAt(want.at);
+  bokeh.uniforms.focus.value = cam.position.distanceTo(want.focus); bokeh.uniforms.aperture.value = shot.type === "close" || shot.type === "over" ? 0.003 : 0.0008;
+  key.target.position.copy(want.focus).setY(0); key.position.copy(key.target.position).add(new V(2.5, 5, 3.5));
+}
+
+// ---------- beats
+const lines = Object.fromEntries((S.lines || []).map(l => [l.key, l]));
+let simT = 0;
+function runBeats() {
+  for (const b of S.beats || []) {
+    if (b.done || simT + 1e-6 < b.t) continue; b.done = true;
+    if (b.shot) { if (b.shot.move > 0) { shotFrom = shotPose(shot); shotT0 = simT; } shot = b.shot; }
+    const a = actors[b.actor] || (!b.actor && Object.values(actors)[0]); if (!a) continue;
+    if (b.view && !b.shot) { if (shot.move > 0) shotFrom = null; shot = b.view === "face" ? { type: "close", actor: a.id } : { type: Object.keys(actors).length > 1 ? "two" : "wide" }; }
+    if (b.face !== undefined) a.group.rotation.y = b.face * Math.PI / 180;
+    if (b.look) a.look = b.look;
+    if (b.walkTo) { a.target = new V(b.walkTo[0], 0, b.walkTo[1]); a.base = b.run ? "run" : "walk"; play(a, a.base); }
+    if (b.move) { a.target = null; a.base = LOOPS.has(b.move) ? b.move : "idle"; play(a, b.move); }
+    if (b.say && lines[b.say]) { a.speaking = { l: lines[b.say], t0: simT }; a.brows = 1; }
+  }
+}
+function frame(dt) {
+  runBeats();
+  for (const a of Object.values(actors)) { a.mixer.update(dt); a.root.updateMatrixWorld(true); body(a, dt, simT); face(a, dt, simT); }
+  if (ctl && !SCENE && window.__free) ctl.update(); else camera(simT);
+  grade.uniforms.t.value = simT; composer.render(dt);
+  simT += dt;
+}
+
+try {
+  const [bot, cmu] = await Promise.all([loadGltfJson("clips/mixamo-clips.json"), getJSON("clips/cmu-clips.json")]);
+  const credit = await buildSet();
+  for (const spec of S.cast) {
+    const m = await loadModel(spec.model || "teen", bot, cmu);
+    for (const b of S.beats || []) if (b.move && (b.actor === spec.id || (!b.actor && spec === S.cast[0]))) await extraClip(m, b.move);
+    makeActor(spec, m);
+  }
+  status.textContent = live ? "Builder Studio demo" + (credit ? " · " + credit : "") : "";
+  window.__ready = true;
+} catch (e) { console.error(e); status.textContent = "Could not load: " + e.message; window.__ready = "error"; }
+
+window.__prepare = async () => Object.keys(actors);
+window.__step = async dt => frame(dt);
+window.__events = () => events;
+if (live && window.__ready === true) { const clock = new THREE.Clock(); r.setAnimationLoop(() => { const dt = Math.min(clock.getDelta(), 0.05); if (simT > S.duration) { simT = 0; S.beats.forEach(b => (b.done = false)); } frame(dt); }); }
+</script></body></html>

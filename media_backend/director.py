@@ -53,9 +53,14 @@ def _json(text: str) -> Any:
 
 def _plan_prompt(stage: str) -> str:
     moves = stage_moves(stage)
+    d = stages_dir() / stage
+    models = sorted(f.stem for f in (d / "models").glob("*.json") if f.stem != "light") if (d / "models").exists() else ["teen"]
+    sets = sorted(x.name for x in (d / "sets").iterdir() if (x / "set.json").exists()) if (d / "sets").exists() else []
     return f"""You direct short videos with a 3D character (stage "{stage}"). Turn the request into a shot plan.
 Answer only JSON: {{"title": str, "voice": one of {list(VOICES)}, "music": one of {MOODS}, "look": one of ["film","warm","cool","noir","vintage","bleach","none"],
 "beats": [{{"say"?: str, "move"?: str, "view"?: "body"|"face", "walk_to"?: [x, z], "run"?: bool, "face"?: degrees, "hold"?: seconds}}]}}
+Optional for several characters: "cast": [{{"id": "a", "model": one of {models}, "voice": voice, "at": [x, z], "face": degrees}}] and beats with "actor": id, "look": "camera" or another id.
+Optional "set": one of {sets} (default: grey studio). Optional camera per beat: "shot": {{"type": "wide"|"two"|"medium"|"close"|"over", "actor"?: id, "target"?: id, "move"?: seconds to glide (0 = cut)}}.
 Rules: beats run in order. Moves must be from: {", ".join(moves)}. Keep lines short and natural (spoken, under 25 words each).
 Use "face" view for important lines and "body" for moves; walk_to stays within 3 metres of the centre ([0, 0]); facing 0 = towards camera.
 Aim for the length the request implies (default 10-20 seconds). Keep it kind and original: no real people's likeness, no famous characters, songs or brands."""
@@ -80,6 +85,17 @@ def _plan(request: str, stage: str, feedback: str | None = None, previous: dict 
     plan["beats"] = beats
     plan["voice"] = plan.get("voice") if plan.get("voice") in VOICES else "am_puck"
     plan["music"] = plan.get("music") if plan.get("music") in MOODS else "none"
+    from .scene import CastMember
+
+    cast = []
+    for c in (plan.get("cast") or [])[:6]:
+        try:
+            cast.append(CastMember(**{k: v for k, v in c.items() if k in CastMember.model_fields}).model_dump())
+        except ValidationError:
+            continue
+    plan["cast"] = cast
+    sdir = stages_dir() / stage / "sets" / str(plan.get("set"))
+    plan["set"] = plan.get("set") if plan.get("set") and (sdir / "set.json").exists() else None
     plan["look"] = plan.get("look") if plan.get("look") in ("film", "warm", "cool", "noir", "vintage", "bleach", "none") else "film"
     return plan
 
@@ -113,7 +129,7 @@ def direct_scene(p: DirectParams) -> OpResult:
     history = []
     for attempt in range(p.max_revisions + 1):
         params = SceneParams(beats=plan["beats"], stage=p.stage, voice=plan["voice"], music=plan["music"], look=plan["look"],
-                             resolution=p.resolution, fps=p.fps)
+                             cast=plan["cast"], set=plan["set"], resolution=p.resolution, fps=p.fps)
         res = run_operation("scene_video", params)
         vid = res.outputs[0].id
         sound = run_operation("audio_check", {"file_id": vid}).data if "audio_check" in REGISTRY else {}

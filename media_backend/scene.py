@@ -43,7 +43,25 @@ def list_stages() -> list[str]:
     return sorted(p.name for p in d.iterdir() if (p / "index.html").exists()) if d.exists() else []
 
 
+class Shot(BaseModel):
+    type: Literal["wide", "two", "medium", "close", "over"] = Field(description="wide: everyone; two: a tighter group shot; medium/close: one actor; over: over actor's shoulder looking at target")
+    actor: str | None = None
+    target: str | None = None
+    move: float = Field(0, ge=0, le=20, description="Seconds to glide to this shot (0 = cut)")
+
+
+class CastMember(BaseModel):
+    id: str = Field(min_length=1, max_length=20)
+    model: str = Field("teen", description="Character model on the stage (models/<name>.json)")
+    voice: str | None = Field(None, description="Kokoro voice for this character's lines")
+    at: list[float] = Field(default_factory=lambda: [0.0, 0.0], min_length=2, max_length=2)
+    face: float = 0
+
+
 class Beat(BaseModel):
+    actor: str | None = Field(None, description="Which cast member (default: the first)")
+    look: str | None = Field(None, description="Where the actor looks: 'camera' or another cast id")
+    shot: Shot | None = Field(None, description="Change the camera shot (studio stages)")
     say: str | None = Field(None, max_length=600, description="A line to speak")
     voice: str | None = Field(None, description="Kokoro voice for this line (default: the scene's voice)")
     move: str | None = Field(None, max_length=40, description="A move or gesture: idle, walk, run, wave, point, thumbs up, agree (nod), headShake, arms crossed, jump, sit, dance, shrug, bow, stretch, kick, pickup, hello, laugh, or any extra CMU move on the stage (explain, sneak, happy walk, moonwalk, ...)")
@@ -58,6 +76,9 @@ class Beat(BaseModel):
 class SceneParams(BaseModel):
     beats: list[Beat] = Field(min_length=1, max_length=60)
     stage: str = Field("teen", description="Stage (character) name; see the stages folder")
+    cast: list[CastMember] = Field(default_factory=list, max_length=6, description="Several characters (default: the stage's one)")
+    set: str | None = Field(None, description="A place on the stage: park, living_room, street (see the stage's sets folder); default the grey studio")
+    quality: Literal["film", "fast"] = Field("film", description="fast skips ambient occlusion (quicker renders)")
     voice: Literal[tuple(VOICES)] = Field("am_puck", description="Default voice")  # type: ignore[valid-type]
     resolution: Literal["640x360", "1280x720", "1920x1080", "2560x1440", "3840x2160"] = "1280x720"
     fps: int = Field(30, ge=12, le=60)
@@ -136,9 +157,11 @@ def scene_video(p: SceneParams) -> OpResult:
     for i, b in enumerate(p.beats):
         t = b.at if b.at is not None else cursor
         beat = {"t": round(t, 3)}
-        for k in ("move", "view", "face"):
+        for k in ("move", "view", "face", "actor", "look"):
             if getattr(b, k) is not None:
                 beat[k] = getattr(b, k)
+        if b.shot:
+            beat["shot"] = b.shot.model_dump(exclude_none=True)
         if b.walk_to:
             beat["walkTo"], beat["run"] = b.walk_to, b.run
         dur = b.hold if (b.move or b.walk_to) else 0.3
@@ -147,7 +170,8 @@ def scene_video(p: SceneParams) -> OpResult:
             dur = max(dur, math.dist(prev, b.walk_to) / SPEED["run" if b.run else "walk"] + 0.4)
         if b.say:
             key = f"l{i}"
-            sp = run_operation("speak", {"text": b.say, "voice": b.voice or p.voice, "name": f"scene_{key}"}).outputs[0].id
+            cast_voice = next((c.voice for c in p.cast if c.id == b.actor and c.voice), None)
+            sp = run_operation("speak", {"text": b.say, "voice": b.voice or cast_voice or p.voice, "name": f"scene_{key}"}).outputs[0].id
             cues = json.loads(storage.path_of(run_operation("lipsync", {"file_id": sp}).outputs[0].id).read_text(encoding="utf-8"))
             polished = run_operation("voice_polish", {"file_id": sp, "style": "podcast"}).outputs[0].id
             roomed = run_operation("room_reverb", {"file_id": polished, "room": p.room}).outputs[0].id
@@ -168,6 +192,16 @@ def scene_video(p: SceneParams) -> OpResult:
         # 2. frames
         scene = {"width": w, "height": h, "fps": p.fps, "duration": duration, "beats": beats,
                  "lines": [{k: v for k, v in ln.items() if k != "t"} for ln in lines]}
+        studio = (stage / "studio.html").exists()
+        if p.cast or p.set or any(b.shot for b in p.beats):
+            if not studio:
+                raise OpError("this stage has no studio page (several characters, sets and shots need studio.html; rebuild it with make_stage.py)")
+            if p.set and not (stage / "sets" / p.set / "set.json").exists():
+                have = sorted(d.name for d in (stage / "sets").iterdir()) if (stage / "sets").exists() else []
+                raise OpError(f"no set called {p.set!r} on this stage (have: {', '.join(have) or 'none'}; add one with add_set.py)")
+        if studio:
+            cast = [c.model_dump() for c in p.cast] or [{"id": "a", "model": "teen", "at": [0, 0], "face": 0}]
+            scene.update({"page": "studio.html", "cast": cast, "set": p.set, "quality": p.quality})
         frames, events = render_stage(stage, scene, work)
 
         # 3. sound: voices at their times, footsteps at the feet's contact times, music under it all

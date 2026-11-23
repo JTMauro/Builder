@@ -5,7 +5,8 @@
 PERSON_morph.glb is a MakeHuman person with talk morphs (run_job.py with "morphs": "talk"). The stage gets:
 index.html (view/talk.html), anim.js, models/teen.json, models/light.json (the HDRI), clips/mixamo-clips.json
 (three.js's MIT sample moves from Xbot.glb), clips/cmu-clips.json + clips/cmu/ (CMU motion capture) and an
-empty sound/lines.json. Default STAGE_DIR for Builder: ~/.builder/stages/<name>.
+empty sound/lines.json, plus studio.html (several characters, sets, camera shots), extra characters
+(--model friend=FRIEND_morph.glb) and sets (--set park). Default STAGE_DIR for Builder: ~/.builder/stages/<name>.
 """
 import argparse
 import base64
@@ -37,12 +38,15 @@ def main():
     ap.add_argument("--workdir", default=os.path.expanduser("~/.builder/makehuman"))
     ap.add_argument("--hdri")
     ap.add_argument("--xbot")
+    ap.add_argument("--model", action="append", default=[], metavar="NAME=PERSON_morph.glb", help="another character for several-character scenes")
+    ap.add_argument("--set", action="append", default=[], help="add a set: park, living_room, street (add_set.py)")
     a = ap.parse_args()
     S = a.stage
     for d in ("models", "clips", "sound"):
         os.makedirs(os.path.join(S, d), exist_ok=True)
     shutil.copy(os.path.join(HERE, "view", "talk.html"), os.path.join(S, "index.html"))
     shutil.copy(os.path.join(HERE, "view", "anim.js"), os.path.join(S, "anim.js"))
+    shutil.copy(os.path.join(HERE, "view", "studio.html"), os.path.join(S, "studio.html"))
     py = [sys.executable, "-I"]
     subprocess.run(py + [os.path.join(HERE, "glb2json.py"), a.glb, os.path.join(S, "models", "teen.json")], check=True)
     xbot = a.xbot or fetch(XBOT, os.path.join(a.workdir, "dl", "Xbot.glb"))
@@ -52,6 +56,11 @@ def main():
               open(os.path.join(S, "models", "light.json"), "w"))
     subprocess.run(py + [os.path.join(HERE, "get_cmu.py"), a.workdir, "--pack", os.path.join(S, "clips", "cmu-clips.json"),
                          "--labels", CORE, "--split", os.path.join(S, "clips", "cmu")], check=True)
+    for spec in a.model:
+        name, glb = spec.split("=", 1)
+        subprocess.run(py + [os.path.join(HERE, "glb2json.py"), glb, os.path.join(S, "models", name + ".json")], check=True)
+    for name in a.set:
+        subprocess.run(py + [os.path.join(HERE, "add_set.py"), S, name], check=True)
     lines = os.path.join(S, "sound", "lines.json")
     if not os.path.exists(lines):
         json.dump({"voice": "", "lines": []}, open(lines, "w"))
