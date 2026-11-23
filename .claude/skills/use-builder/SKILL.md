@@ -100,6 +100,13 @@ stored per person; the caller keeps `history`. A stage's files are served read-o
 `~/.builder/stages/<name>/index.html` in step with `tools/makehuman/view/talk.html`. `TALK_STUB_REPLY` (JSON
 `{say, gesture}`) replaces Claude for demos and tests.
 
+## Picture to 3D model
+
+`image_to_3d` (TripoSR, MIT, free and local) turns a photo of one object into a .glb (or .obj) with vertex
+colours: `resolution` 128 (quick) / 256 (default), `remove_background`, `foreground_ratio`, `max_faces` to
+slim it for web or games. Slow on CPU (start with `wait=false`); the hidden back is guessed. Needs
+`pip install "builder[image3d]"`; weights (~1.7 GB) download on first use.
+
 ## Free assets for a build
 
 `asset_search` (HDRI skies, textures, models, CC images and sounds; licence and credit in every result),

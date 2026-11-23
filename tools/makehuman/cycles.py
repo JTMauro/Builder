@@ -444,11 +444,13 @@ def world_mesh(o):
 
 def hair_melanin(rgb):
     """Melanin and redness for Cycles' Principled Hair from a hair colour (linear RGB, e.g. the mean of the
-    hair texture). Calibrated by eye on renders: MakeHuman light brown (sRGB .40,.315,.235) -> 0.45, 0.28;
-    near-black -> 0.9; blonde -> about 0.2. Redness follows the red/blue ratio (ginger -> 1)."""
+    hair texture). Calibrated by eye on renders, by log luminance: MakeHuman light brown (sRGB .40,.315,.235)
+    -> 0.38, near-black (sRGB .09,.06,.045) -> 0.95, blonde (sRGB .75,.6,.4) -> 0.12. Redness follows the
+    red/blue ratio (light brown 0.26, ginger 1)."""
+    import numpy as np
     r, g, b = (max(float(c), 1e-4) for c in rgb)
     lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    mel = min(0.97, max(0.05, -0.19 * math.log(lum)))
+    mel = float(np.interp(math.log(lum), [-4.8, -2.4, -1.0, 0.0], [0.95, 0.38, 0.12, 0.05]))
     red = min(1.0, max(0.0, (math.log(r / b) - 0.4) / 2.6))
     return mel, red
 
@@ -522,14 +524,32 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
                 c = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
             rgb = tuple(float(x) for x in c)
 
-    # scalp = body vertices whose outward normal ray meets the card within 4.5 cm (as gen.py paints it)
+    def alpha_at(fi, s):
+        if img is None or C["uv"] is None:
+            return 1.0
+        a, b_, c = (Vector(C["co"][k]) for k in C["tri"][fi])
+        uvt = [Vector((*C["uv"][fi][k], 0.0)) for k in range(3)]
+        uvp = geometry.barycentric_transform(s, a, b_, c, *uvt)
+        h, w = img.shape[:2]
+        x = int((uvp.x % 1.0) * (w - 1)); y = int((uvp.y % 1.0) * (h - 1))
+        return float(img[y, x, 3])
+
+    # scalp = skin whose outward normal ray meets an opaque part of the card within 4.5 cm (as gen.py
+    # paints it); skin below the eyes in front of the ears (cheeks, sideburns, ears) never grows hair
     head = bone(arm, "Head")
     head_z = (arm.matrix_world @ head.head).z if head else C["co"][:, 2].min()
-    cand = np.nonzero(B["co"][:, 2] > head_z - 0.03)[0]
-    flag = np.zeros(len(B["co"]), bool)
+    eye_z = B["co"][:, 2].max() - 0.12
+    eyes = [o for o in bpy.data.objects if o.type == "MESH" and mat_kind(o) == "eye"]
+    if eyes:
+        eye_z = float(world_mesh(eyes[0])["co"][:, 2].mean())
+    mid_y = float(C["co"][:, 1].mean())
+    co = B["co"]
+    cand = np.nonzero((co[:, 2] > head_z - 0.03) & ~((co[:, 2] < eye_z + 0.01) & (co[:, 1] < mid_y)))[0]
+    flag = np.zeros(len(co), bool)
     for i in cand:
-        p, n = Vector(B["co"][i]), Vector(B["nr"][i])
-        if C["bvh"].ray_cast(p + n * 0.0005, n, 0.045)[0] is not None:
+        p, n = Vector(co[i]), Vector(B["nr"][i])
+        hit, _, fi, _ = C["bvh"].ray_cast(p + n * 0.0005, n, 0.045)
+        if hit is not None and alpha_at(fi, hit) > 0.5:
             flag[i] = True
     st = B["tri"][flag[B["tri"]].all(1)]
     if not len(st):
@@ -561,16 +581,6 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
         g = Vector((0, 0, -1.0)); g -= sn * g.dot(sn)
         f = (v.normalized() if v.length > 1e-6 else g) + g * 0.6
         return f.normalized() if f.length > 1e-6 else g
-
-    def alpha_at(fi, s):
-        if img is None or C["uv"] is None:
-            return 1.0
-        a, b_, c = (Vector(C["co"][k]) for k in C["tri"][fi])
-        uvt = [Vector((*C["uv"][fi][k], 0.0)) for k in range(3)]
-        uvp = geometry.barycentric_transform(s, a, b_, c, *uvt)
-        h, w = img.shape[:2]
-        x = int((uvp.x % 1.0) * (w - 1)); y = int((uvp.y % 1.0) * (h - 1))
-        return float(img[y, x, 3])
 
     step, ramp, lmax = 0.004, 0.015, length_cm / 100.0
     NP = 12
@@ -621,6 +631,7 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
         log("strand hair: no guide could grow, skipped")
         return None
     G, R = np.array(G), np.array(R)
+    strand_hair.guides = G                                   # for debugging / tests
     log(f"strand hair: scalp {scalp_cm2:.0f} cm2, {len(G)} guides ({time.time() - t0:.1f}s)")
 
     # children: blend of the 3 nearest guides, a little clumping toward the nearest
@@ -645,8 +656,8 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
     near = G[idx[:, 0]]
     shape = shape + (near - shape) * (clump * S[None, :, None] ** 1.5)
     shape = shape + (croots[:, None] - base) * (1 - 0.6 * S[None, :, None])
-    # length variation: keep the first 75-100 % of the curve, resampled to NP points
-    lf = 0.75 + 0.25 * rng.random(nc)
+    # length variation: keep the first 60-100 % of the curve, resampled to NP points
+    lf = 1.0 - 0.4 * rng.random(nc) ** 2               # uneven, tapered ends (no blunt edge)
     x = S[None, :] * lf[:, None] * (NP - 1)
     i0 = np.minimum(np.floor(x).astype(int), NP - 2); fr = (x - i0)[:, :, None]
     ar = np.arange(nc)[:, None]
@@ -677,6 +688,7 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
             else:
                 continue
             shape[i, k] = q
+    strand_hair.strands = shape
     log(f"strand hair: {nc} strands ({time.time() - t0:.1f}s)")
 
     cv = bpy.data.hair_curves.new("Hair strands")

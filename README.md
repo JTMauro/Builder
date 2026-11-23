@@ -196,6 +196,7 @@ claude mcp add builder -- builder mcp
 | `film_look` | Film grade presets or your own .cube LUT, grain, vignette, cinema bars |
 | `upscale` | 2x/4x (Real-ESRGAN when installed, else sharp Lanczos) |
 | `smooth_motion` | 60 fps or slow motion by in-between frames (RIFE when installed, else ffmpeg) |
+| `image_to_3d` | A picture of one object to a 3D model (.glb/.obj, vertex colours) with TripoSR (MIT, free, local): background removal, marching cubes `resolution` 128–512, optional `max_faces`; ~1 min+ on CPU, first use downloads ~1.9 GB; needs `pip install "builder[image3d]"` |
 | `asset_search` | Free, licensed assets for builds: HDRI skies, PBR textures and 3D models (Poly Haven, ambientCG; CC0), Creative Commons images and sounds (Openverse), sound effects (Freesound with `FREESOUND_API_KEY`) |
 | `asset_import` | Download a found asset (or a direct link) into the library; its licence and credit line are saved in `license.json` beside it |
 | `page_references` | Collect the images on one web page as look references |

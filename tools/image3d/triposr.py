@@ -47,6 +47,35 @@ def vit_keys(state: dict, want: set) -> dict:
     return out
 
 
+def dense_volume(density, n: int, threshold: float):
+    """Density on an n^3 grid, coarse to fine: a coarse grid finds the cells the surface passes through and
+    only those (plus a one-cell margin) are evaluated at full resolution; elsewhere the coarse values are
+    interpolated, which stay on one side of the threshold so they add no surface. About 10x fewer queries
+    than the full grid at 256. Returns (volume as a numpy array, number of points queried)."""
+    import torch
+    import torch.nn.functional as F
+
+    m = min(n, max(64, n // 4))
+    if m >= n:
+        lin = torch.linspace(0, 1, n)
+        g = torch.stack(torch.meshgrid(lin, lin, lin, indexing="ij"), -1).reshape(-1, 3)
+        return density(g).reshape(n, n, n).numpy(), n ** 3
+    lc = torch.linspace(0, 1, m)
+    coarse = density(torch.stack(torch.meshgrid(lc, lc, lc, indexing="ij"), -1).reshape(-1, 3)).reshape(m, m, m)
+    inside = (coarse > threshold).float()[None, None]
+    any_in = F.max_pool3d(inside, 2, 1)[0, 0] > 0             # per coarse cell: some corner inside...
+    all_in = -F.max_pool3d(-inside, 2, 1)[0, 0] > 0           # ...and every corner inside
+    cells = (any_in & ~all_in).float()[None, None]
+    cells = F.max_pool3d(cells, 3, 1, 1)[0, 0] > 0             # one-cell margin for thin parts
+    vol = F.interpolate(coarse[None, None], size=(n, n, n), mode="trilinear", align_corners=True)[0, 0]
+    ci = torch.clamp((torch.arange(n) * (m - 1) / (n - 1)).floor().long(), max=m - 2)
+    mask = cells[ci][:, ci][:, :, ci]
+    idx = torch.nonzero(mask)
+    if len(idx):
+        vol[idx[:, 0], idx[:, 1], idx[:, 2]] = density(idx.float() / (n - 1))
+    return vol.numpy(), m ** 3 + len(idx)
+
+
 def load_model(TSR, weights: str):
     import torch
     from omegaconf import OmegaConf
@@ -131,11 +160,14 @@ def main() -> None:
 
     t = time.time()
     n, radius = a.mc, model.renderer.cfg.radius
-    lin = torch.linspace(0, 1, n)
-    grid = torch.stack(torch.meshgrid(lin, lin, lin, indexing="ij"), -1).reshape(-1, 3)
-    with torch.no_grad():
-        dens = model.renderer.query_triplane(model.decoder, scale_tensor(grid, (0, 1), (-radius, radius)).to(device), code)["density_act"]
-    vol = dens.reshape(n, n, n).float().cpu().numpy()
+
+    def density(pts01):   # points in [0, 1]^3 -> TripoSR density
+        with torch.no_grad():
+            d = model.renderer.query_triplane(model.decoder, scale_tensor(pts01, (0, 1), (-radius, radius)).to(device), code)["density_act"]
+        return d.reshape(-1).float().cpu()
+
+    vol, queried = dense_volume(density, n, a.threshold)
+    times["grid_points"] = queried
     if vol.max() <= a.threshold:
         raise SystemExit("the model found no solid object in the picture (try remove_background or a plainer photo)")
     verts, faces, _, _ = marching_cubes(vol, a.threshold, gradient_direction="descent")
