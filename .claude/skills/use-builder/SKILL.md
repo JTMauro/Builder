@@ -77,6 +77,17 @@ Voice ops: `speak` (Kokoro TTS), `transcribe`, `burn_captions`, `lipsync`, `deno
 animation), and `audio_check` (LUFS, true peak, clipping, silences; with `expected_text`, a Whisper word match)
 before delivering anything with sound. Mix music or ambience under a video with `replace_audio`.
 
+## Characters, scenes and films
+
+`scene_video` turns beats into a finished video on a stage (stages live in `~/.builder/stages`; build one
+with `tools/makehuman/make_stage.py`, add places with `add_set.py`): `cast` for several characters with
+their own voices, `set` (park, living_room, street), per-beat `actor`, `say`, `move`, `walk_to`, `look`
+and `shot` (wide, two, medium, close, over; `move` seconds to glide). `direct_scene` does it from plain
+words and checks its own result; `make_anything` routes any request. `render_still` makes photoreal
+Cycles stills; `video_to_motion` captures body and face from a video; `style_check` / `visual_diff`
+catch unwanted changes against approved pictures. Rendering is slow on CPU (720p about 2–4 s a frame);
+start long jobs with `wait=false`.
+
 ## Free assets for a build
 
 `asset_search` (HDRI skies, textures, models, CC images and sounds; licence and credit in every result),

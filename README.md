@@ -177,7 +177,7 @@ claude mcp add builder -- builder mcp
 | `animate_image` | **Animation**: bring one still image to life: zoom_in, zoom_out, pan_left, pan_right, bounce, wobble |
 | `reframe` | Vertical 9:16, square, 4:5, 16:9 or 21:9 versions, by cropping or over a blurred background |
 | `timeline_export` | An edit timeline (FCPXML) for DaVinci Resolve, Final Cut or Premiere: clips with in/out points plus music |
-| `speak` | Natural speech from text with a free local voice (Kokoro, 14 English voices); needs `pip install "builder[voice]"` |
+| `speak` | Natural speech from text with a free local voice (Kokoro, 37 voices: US/UK English, Spanish, French, Italian, Portuguese, Hindi); needs `pip install "builder[voice]"` |
 | `transcribe` | Captions (.srt + .vtt), text and word timings with Whisper (free, local) |
 | `burn_captions` | Styled captions onto a video (clean, boxed, bold-yellow), from a file or by transcribing first |
 | `lipsync` | Mouth shapes over time for a voice track (Rhubarb-style cues A–H, X) to animate a character's mouth |
@@ -186,6 +186,13 @@ claude mcp add builder -- builder mcp
 | `make_ambience` | Room tone and backgrounds: room, office, outdoors, city, rain, wind, crowd_murmur, forest (any length, seeded) |
 | `footsteps` | Footsteps on wood, concrete, grass, gravel, carpet, tile or snow; walk/run or `steps_per_s`, a `count` or `length_s`, or exact `times` (an animation's foot contacts) |
 | `audio_check` | Sound QC report (.json): loudness (LUFS) vs a target, true peak, clipping, long silences, DC offset; with `expected_text`, Whisper word match against the script (missing/extra words, WER) |
+| `scene_video` | A finished video of 3D characters acting out beats (lines, moves, walking, camera shots and cuts), with several characters, sets (park, living room, street), voices, lip-sync, footsteps, music, captions and a film look |
+| `direct_scene` | Plain words in, finished video out: Claude plans the shots, `scene_video` renders them, Claude watches the result and revises it (needs `ANTHROPIC_API_KEY`) |
+| `make_anything` | Picks and runs the right tool for a request (video, still, music, ambience, voice, 3D from a picture); for games and pages it explains how to start a Craft build |
+| `render_still` | Photoreal Blender Cycles still of a MakeHuman character (skin subsurface, HDRI light, depth of field, up to 4K) |
+| `video_to_motion` | Body and face motion capture from an ordinary video (MediaPipe): landmarks per frame plus face shapes mapped to talking-character morphs |
+| `visual_diff` | Compares a new picture or frame with an approved one: SSIM score, pass/fail and a heat map of what changed |
+| `style_check` | Renders a stage's fixed views and compares them with the approved look (or approves the current look) |
 | `film_look` | Film grade presets or your own .cube LUT, grain, vignette, cinema bars |
 | `upscale` | 2x/4x (Real-ESRGAN when installed, else sharp Lanczos) |
 | `smooth_motion` | 60 fps or slow motion by in-between frames (RIFE when installed, else ffmpeg) |
