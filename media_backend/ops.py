@@ -774,5 +774,7 @@ def describe_operations() -> list[dict[str, Any]]:
     ]
 
 
-from . import unreal as _unreal  # noqa: E402,F401  (registers the unreal_* operations)
-from . import assets as _assets  # noqa: E402,F401  (registers asset_search, asset_import, page_references)
+from . import unreal as _unreal_ops  # noqa: E402,F401  (registers the unreal_* operations)
+from . import assets as _asset_ops  # noqa: E402,F401  (registers asset_search, asset_import, page_references)
+from . import voice as _voice_ops  # noqa: E402,F401  (speak, transcribe, burn_captions, lipsync, audio polish)
+from . import finish as _finishing_ops  # noqa: E402,F401  (film_look, upscale, smooth_motion)

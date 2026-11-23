@@ -177,6 +177,14 @@ claude mcp add builder -- builder mcp
 | `animate_image` | **Animation**: bring one still image to life: zoom_in, zoom_out, pan_left, pan_right, bounce, wobble |
 | `reframe` | Vertical 9:16, square, 4:5, 16:9 or 21:9 versions, by cropping or over a blurred background |
 | `timeline_export` | An edit timeline (FCPXML) for DaVinci Resolve, Final Cut or Premiere: clips with in/out points plus music |
+| `speak` | Natural speech from text with a free local voice (Kokoro, 14 English voices); needs `pip install "builder[voice]"` |
+| `transcribe` | Captions (.srt + .vtt), text and word timings with Whisper (free, local) |
+| `burn_captions` | Styled captions onto a video (clean, boxed, bold-yellow), from a file or by transcribing first |
+| `lipsync` | Mouth shapes over time for a voice track (Rhubarb-style cues A–H, X) to animate a character's mouth |
+| `denoise_audio`, `voice_polish`, `room_reverb` | Remove background noise; broadcast/podcast/warm/phone/radio voice; place a voice in a room, hall, church… |
+| `film_look` | Film grade presets or your own .cube LUT, grain, vignette, cinema bars |
+| `upscale` | 2x/4x (Real-ESRGAN when installed, else sharp Lanczos) |
+| `smooth_motion` | 60 fps or slow motion by in-between frames (RIFE when installed, else ffmpeg) |
 | `asset_search` | Free, licensed assets for builds: HDRI skies, PBR textures and 3D models (Poly Haven, ambientCG; CC0), Creative Commons images and sounds (Openverse), sound effects (Freesound with `FREESOUND_API_KEY`) |
 | `asset_import` | Download a found asset (or a direct link) into the library; its licence and credit line are saved in `license.json` beside it |
 | `page_references` | Collect the images on one web page as look references |
