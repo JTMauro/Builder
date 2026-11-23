@@ -91,3 +91,9 @@ def test_visual_diff(media):
     assert ops.media_info(diff.outputs[0].id)["video"]["width"] == 200
     with pytest.raises(ops.OpError):
         ops.run_operation("visual_diff", {"file_id": media["audio"], "reference_id": media["image"]})
+
+
+def test_render_still_needs_blender(tmp_path, monkeypatch):
+    monkeypatch.setenv("BUILDER_MAKEHUMAN_DIR", str(tmp_path / "mh"))
+    with pytest.raises(ops.OpError, match="aren't installed"):
+        ops.run_operation("render_still", {"character": "teen"})

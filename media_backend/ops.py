@@ -782,3 +782,4 @@ from . import sound_design as _sound_ops  # noqa: E402,F401  (make_music, make_a
 from . import scene as _scene_ops  # noqa: E402,F401  (scene_video)
 from . import checks as _check_ops  # noqa: E402,F401  (visual_diff)
 from . import motion as _motion_ops  # noqa: E402,F401  (video_to_motion)
+from . import stills as _still_ops  # noqa: E402,F401  (render_still)
