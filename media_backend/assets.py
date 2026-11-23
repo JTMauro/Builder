@@ -34,7 +34,8 @@ from .ops import OpError, OpResult, _guarded, operation
 
 UA = "Builder-asset-finder/0.3"
 MAX_BYTES = 600 * 1024 * 1024
-SOURCES = ("polyhaven", "ambientcg", "openverse", "freesound")
+SOURCES = ("polyhaven", "ambientcg", "openverse", "freesound", "nasa", "smithsonian", "archive")
+PD = {"license": "Public domain", "license_url": "https://creativecommons.org/publicdomain/mark/1.0/"}
 CC0 = {"license": "CC0 1.0", "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"}
 
 
@@ -178,15 +179,74 @@ def _freesound(q: str, kind: str, limit: int) -> list[dict[str, Any]]:
     return out
 
 
+def _nasa(q: str, kind: str, limit: int) -> list[dict[str, Any]]:
+    """NASA Image and Video Library: public domain (NASA material isn't copyrighted; no NASA endorsement implied)."""
+    media = {"image": "image", "sound": "audio", "video": "video"}.get(kind, "image,video,audio" if kind == "any" else "")
+    if not media:
+        return []
+    items = _get_json("https://images-api.nasa.gov/search?" + urllib.parse.urlencode({"q": q, "media_type": media, "page_size": limit})).get("collection", {}).get("items", [])
+    out = []
+    for it in items[:limit]:
+        d = (it.get("data") or [{}])[0]
+        mt = d.get("media_type")
+        out.append({"source": "nasa", "id": d.get("nasa_id"), "kind": {"audio": "sound"}.get(mt, mt), "title": d.get("title"),
+                    "preview": next((l["href"] for l in it.get("links", []) if l.get("render") == "image"), None),
+                    "page": f"https://images.nasa.gov/details/{d.get('nasa_id')}", "creator": d.get("photographer") or d.get("center") or "NASA", **PD,
+                    "attribution": f"{d.get('title')} (NASA)", "note": "NASA material: public domain; don't imply NASA endorsement or use the NASA logo."})
+    return out
+
+
+def _smithsonian(q: str, kind: str, limit: int) -> list[dict[str, Any]]:
+    """Smithsonian Open Access: CC0 images and 3D scans (api.data.gov key optional: SMITHSONIAN_API_KEY, else the shared DEMO_KEY)."""
+    if kind not in ("any", "image", "model"):
+        return []
+    key = os.environ.get("SMITHSONIAN_API_KEY") or "DEMO_KEY"
+    qq = q + (' AND online_media_type:"3D Images"' if kind == "model" else "")
+    rows = _get_json("https://api.si.edu/openaccess/api/v1.0/search?" + urllib.parse.urlencode({"q": qq, "rows": limit * 2, "api_key": key})).get("response", {}).get("rows", [])
+    out = []
+    for r in rows:
+        media = (((r.get("content") or {}).get("descriptiveNonRepeating") or {}).get("online_media") or {}).get("media") or []
+        cc0 = [m for m in media if (m.get("usage") or {}).get("access") == "CC0"]
+        if not cc0:
+            continue
+        m = cc0[0]
+        three = [x for x in cc0 if x.get("type") == "3d_package" or "3d" in str(x.get("type", "")).lower()]
+        out.append({"source": "smithsonian", "id": r.get("id"), "kind": "model" if three else "image", "title": r.get("title"),
+                    "preview": m.get("thumbnail"), "page": ((r.get("content") or {}).get("descriptiveNonRepeating") or {}).get("record_link"),
+                    "creator": r.get("unitCode") or "Smithsonian", **CC0})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _archive(q: str, kind: str, limit: int) -> list[dict[str, Any]]:
+    """Internet Archive items marked public domain or CC0 (music includes Musopen's public-domain recordings)."""
+    mt = {"sound": "audio", "image": "image", "video": "movies"}.get(kind, None if kind == "any" else "x")
+    if mt == "x":
+        return []
+    query = f"({q}) AND (licenseurl:*publicdomain* OR collection:musopen*)" + (f" AND mediatype:{mt}" if mt else " AND mediatype:(audio OR movies OR image)")
+    docs = _get_json("https://archive.org/advancedsearch.php?" + urllib.parse.urlencode(
+        {"q": query, "fl[]": ["identifier", "title", "creator", "mediatype", "licenseurl"], "rows": limit, "output": "json"}, doseq=True)).get("response", {}).get("docs", [])
+    out = []
+    for d in docs:
+        lic = str(d.get("licenseurl") or "")
+        out.append({"source": "archive", "id": d["identifier"], "kind": {"audio": "sound", "movies": "video"}.get(d.get("mediatype"), "image"),
+                    "title": d.get("title"), "preview": f"https://archive.org/services/img/{d['identifier']}", "page": f"https://archive.org/details/{d['identifier']}",
+                    "creator": d.get("creator") if isinstance(d.get("creator"), str) else ", ".join(d.get("creator") or []),
+                    "license": "CC0 1.0" if "zero" in lic else "Public domain", "license_url": lic or PD["license_url"],
+                    "note": "Marked public domain by the uploader: check the page (old compositions are free, but a recording can still be someone's)."})
+    return out
+
+
 class AssetSearchParams(BaseModel):
     query: str = Field(min_length=1, max_length=200, description="What you need, e.g. 'sunset sky', 'brick wall', 'wooden chair', 'rain'")
-    kind: Literal["any", "hdri", "texture", "model", "image", "sound"] = Field("any", description="hdri = sky/studio lighting; texture = PBR material; model = 3D model; image = photo/illustration; sound = audio")
-    source: Literal["any", "polyhaven", "ambientcg", "openverse", "freesound"] = "any"
+    kind: Literal["any", "hdri", "texture", "model", "image", "sound", "video"] = Field("any", description="hdri = sky/studio lighting; texture = PBR material; model = 3D model; image = photo/illustration/art; sound = audio/music; video = footage")
+    source: Literal["any", "polyhaven", "ambientcg", "openverse", "freesound", "nasa", "smithsonian", "archive"] = "any"
     limit: int = Field(12, ge=1, le=40)
     commercial_only: bool = Field(True, description="Only licences that allow commercial use (CC0, CC BY, CC BY-SA)")
 
 
-@operation("asset_search", AssetSearchParams, "Find free, licensed assets for a build: HDRI skies, PBR textures and 3D models (Poly Haven, ambientCG, CC0), Creative Commons images and sounds (Openverse), sound effects (Freesound, with a key). Returns ids to pass to asset_import, with licence and credit.", read_only=True)
+@operation("asset_search", AssetSearchParams, "Find free, licensed assets for a build: HDRI skies, PBR textures and 3D models (Poly Haven, ambientCG, CC0), Creative Commons images and sounds (Openverse), sound effects (Freesound, with a key), public-domain space images/video (NASA), CC0 museum images and 3D scans (Smithsonian), public-domain music, films and sounds (Internet Archive, incl. Musopen). Returns ids to pass to asset_import, with licence and credit.", read_only=True)
 def asset_search(p: AssetSearchParams) -> OpResult:
     results, errors = [], []
     plan = [s for s in SOURCES if p.source in ("any", s)]
@@ -200,6 +260,12 @@ def asset_search(p: AssetSearchParams) -> OpResult:
                 results += _openverse(p.query, p.kind, p.limit, p.commercial_only)
             elif s == "freesound":
                 results += _freesound(p.query, p.kind, p.limit)
+            elif s == "nasa":
+                results += _nasa(p.query, p.kind, p.limit)
+            elif s == "smithsonian":
+                results += _smithsonian(p.query, p.kind, p.limit)
+            elif s == "archive":
+                results += _archive(p.query, p.kind, p.limit)
         except OpError as e:
             errors.append(f"{s}: {e}")
     note = "" if os.environ.get("FREESOUND_API_KEY") else "Freesound is off (set FREESOUND_API_KEY, free at freesound.org/apiv2/apply)."
@@ -226,7 +292,7 @@ def _ext_from(url: str, default: str) -> str:
 
 
 class AssetImportParams(BaseModel):
-    source: Literal["polyhaven", "ambientcg", "openverse", "freesound", "url"] = Field(description="Where the asset is from (as asset_search returned it), or url for a direct link")
+    source: Literal["polyhaven", "ambientcg", "openverse", "freesound", "nasa", "smithsonian", "archive", "url"] = Field(description="Where the asset is from (as asset_search returned it), or url for a direct link")
     asset_id: str | None = Field(None, max_length=200, description="The result's id (Poly Haven, ambientCG, Openverse, Freesound)")
     url: str | None = Field(None, max_length=2000, description="With source=url: a direct link to an image, sound or video on a public site")
     kind: Literal["hdri", "texture", "model", "image", "sound"] | None = Field(None, description="Poly Haven: which kind the id is (from asset_search)")
@@ -338,6 +404,53 @@ def _import(p: AssetImportParams, work: Path) -> OpResult:
                           "license": meta.get("license"), "license_url": meta.get("license"),
                           "attribution": f"\"{meta.get('name')}\" by {meta.get('username')} (freesound.org), {meta.get('license')}",
                           "note": "High-quality preview (MP3). The original file needs a Freesound login."})
+    if p.source == "nasa":
+        files = [x["href"] for x in _get_json(f"https://images-api.nasa.gov/asset/{urllib.parse.quote(p.asset_id)}").get("collection", {}).get("items", [])]
+        pick = (next((u for u in files if "~orig" in u and not u.endswith(".json")), None) or next((u for u in files if "~large" in u), None)
+                or next((u for u in files if not u.endswith((".json", ".srt", ".vtt"))), None))
+        if not pick:
+            raise OpError("NASA asset has no downloadable file")
+        pick = pick.replace("http://", "https://")
+        f = work / ("nasa" + _ext_from(pick, ".jpg"))
+        _download(pick, f)
+        return _register(f, storage.safe_name(p.asset_id)[:60] + f.suffix,
+                         {"source": "nasa", "id": p.asset_id, "page": f"https://images.nasa.gov/details/{p.asset_id}", "creator": "NASA", **PD,
+                          "attribution": f"NASA ({p.asset_id})", "note": "Public domain; don't imply NASA endorsement or use NASA logos."})
+    if p.source == "smithsonian":
+        key = os.environ.get("SMITHSONIAN_API_KEY") or "DEMO_KEY"
+        r = _get_json(f"https://api.si.edu/openaccess/api/v1.0/content/{urllib.parse.quote(p.asset_id)}?" + urllib.parse.urlencode({"api_key": key})).get("response", {})
+        media = ((r.get("content") or {}).get("descriptiveNonRepeating") or {}).get("online_media", {}).get("media", [])
+        cc0 = [m for m in media if (m.get("usage") or {}).get("access") == "CC0"]
+        want = [m for m in cc0 if p.kind == "model" and ("3d" in str(m.get("type", "")).lower())] or cc0
+        if not want:
+            raise OpError("No CC0 media on that Smithsonian record")
+        m = want[0]
+        url = next((r2.get("content") for r2 in (m.get("resources") or []) if str(r2.get("label", "")).lower().startswith(("high", "full", "glb", "low"))), None) or m.get("content")
+        f = work / ("si" + _ext_from(url, ".jpg"))
+        _download(url, f)
+        return _register(f, storage.safe_name((r.get("title") or p.asset_id)[:60]) + f.suffix,
+                         {"source": "smithsonian", "id": p.asset_id, "page": ((r.get("content") or {}).get("descriptiveNonRepeating") or {}).get("record_link"),
+                          "creator": r.get("unitCode"), **CC0, "attribution": f"{r.get('title')} (Smithsonian Open Access, CC0)"})
+    if p.source == "archive":
+        meta = _get_json(f"https://archive.org/metadata/{urllib.parse.quote(p.asset_id)}")
+        lic = str((meta.get("metadata") or {}).get("licenseurl") or "")
+        cols = (meta.get("metadata") or {}).get("collection") or []
+        cols = cols if isinstance(cols, list) else [cols]
+        if "publicdomain" not in lic and not any(str(c).startswith("musopen") for c in cols):
+            raise OpError("That Internet Archive item isn't marked public domain or CC0")
+        pref = (".flac", ".mp3", ".ogg", ".mp4", ".webm", ".ogv", ".png", ".jpg", ".jpeg")
+        files = sorted((f for f in meta.get("files", []) if str(f.get("name", "")).lower().endswith(pref) and f.get("source") in ("original", "derivative")),
+                       key=lambda f: (pref.index(Path(f["name"].lower()).suffix), -int(f.get("size") or 0)))
+        if not files:
+            raise OpError("No usable media file in that item")
+        name = files[0]["name"]
+        f = work / ("ia" + Path(name).suffix.lower())
+        _download(f"https://archive.org/download/{urllib.parse.quote(p.asset_id)}/{urllib.parse.quote(name)}", f)
+        md = meta.get("metadata") or {}
+        return _register(f, storage.safe_name(Path(name).stem)[:60] + f.suffix,
+                         {"source": "archive", "id": p.asset_id, "page": f"https://archive.org/details/{p.asset_id}", "creator": md.get("creator"),
+                          "license": "CC0 1.0" if "zero" in lic else "Public domain", "license_url": lic or PD["license_url"],
+                          "attribution": f"{md.get('title')} ({md.get('creator') or 'unknown'}), via Internet Archive, public domain"})
     raise OpError(f"Unknown source {p.source}")
 
 

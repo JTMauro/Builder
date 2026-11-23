@@ -35,6 +35,13 @@ def net(monkeypatch):
                                  "creator": "Ana", "foreign_landing_url": "https://flickr/x", "attribution": "forest by Ana, CC BY 4.0"}]}
         if "openverse" in url:
             return {"results": []}
+        if "images-api.nasa.gov/search" in url:
+            return {"collection": {"items": [{"data": [{"nasa_id": "as11-40-5903", "title": "Moon walk", "media_type": "image", "center": "JSC"}],
+                                              "links": [{"href": "https://images-assets.nasa.gov/p.jpg", "render": "image"}]}]}}
+        if "api.si.edu" in url:
+            return {"response": {"rows": []}}
+        if "archive.org/advancedsearch" in url:
+            return {"response": {"docs": [{"identifier": "musopen-bach", "title": "Bach Prelude", "mediatype": "audio", "licenseurl": "http://creativecommons.org/publicdomain/mark/1.0/"}]}}
         raise AssertionError(url)
 
     def download(url, dest):
@@ -91,3 +98,10 @@ def test_page_references(monkeypatch):
 def test_import_url_needs_url():
     with pytest.raises(ops.OpError):
         ops.run_operation("asset_import", {"source": "url"})
+
+
+def test_public_domain_sources(net):
+    space = ops.run_operation("asset_search", {"query": "moon", "kind": "image", "source": "nasa"}).data["results"]
+    assert space[0]["source"] == "nasa" and space[0]["license"] == "Public domain" and "endorsement" in space[0]["note"]
+    music = ops.run_operation("asset_search", {"query": "bach", "kind": "sound", "source": "archive"}).data["results"]
+    assert music[0]["id"] == "musopen-bach" and music[0]["kind"] == "sound"
