@@ -57,6 +57,19 @@ fixed. Add to it at the end of every session (newest lessons at the top of each 
 - The voice list lives in media_backend/voices.py (no imports) to avoid circular imports; op modules
   that need other op modules import them inside functions.
 
+## Big goal: books to a full-length movie
+
+The owner is writing books in other projects. Once they're finished, turn them into a full-length
+movie with this studio: chapters → scenes (direct_scene plans), a recurring cast in the character
+library (make_character, fixed voices), sets per location, make_film per act, dub_scene for other
+languages, Resolve timelines for the final edit. Feature length needs a GPU (CPU: ~4 s per 720p frame
+→ days); photoreal needs MetaHuman (Unreal) or GPU video models. Ask which project/repo holds the
+books before starting.
+
+Backups: the owner has download packs of everything outside git (chat transcript, library, voice
+lines, characters, stage, renders). Refresh them at the end of big sessions (container resets lose
+~/.builder).
+
 ## Where we stopped (resume here)
 
 - Done this session: scene_video with casts, 9 sets, props, camera shots; director, make_anything,
