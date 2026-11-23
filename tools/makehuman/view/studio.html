@@ -299,6 +299,14 @@ const GRIP = {
   binder_notebook: { node: "binder_notebook_closed", pos: [0.0, 0.14, 0.02], rot: [90, 0, 0] },
   Megaphone_01: { pos: [0.0, 0.10, 0.05], rot: [0, 0, 0] },
   plastic_bottle_gallon: { pos: [0.0, 0.20, 0.02], rot: [180, 0, 0] },
+  // arena kit (CC0, Kenney / Quaternius): blades out of the fist like the bat, shields on the forearm, helmet on the head
+  gladiator_sword: { pos: [0.0, 0.09, 0.03], rot: [0, 0, -90], grip: [0, -0.36, 0] },
+  gladiator_axe: { pos: [0.0, 0.09, 0.03], rot: [0, 0, -90], grip: [0, -0.30, 0] },
+  gladiator_spear: { pos: [0.0, 0.09, 0.03], rot: [0, 0, -90], grip: [0, -0.35, 0] },
+  gladiator_shield_round: { pos: [0.02, -0.12, 0.10], rot: [0, 90, 0] },
+  gladiator_shield_heater: { pos: [0.02, -0.12, 0.10], rot: [0, 90, 0] },
+  gladiator_helmet: { bone: "Head", pos: [0.0, 0.075, 0.015], rot: [0, 0, 0], scale: 1.55 },   // TODO: crest covers the face; needs re-orienting
+  arena_torch: { pos: [0.0, 0.09, 0.03], rot: [0, 0, -90], grip: [0, -0.15, 0] },
 };
 for (const [k, v] of Object.entries(S.grips || {})) GRIP[k] = { ...(GRIP[k] || GRIP._default), ...v };   // per-scene grip tuning / new props
 const props = {};
@@ -319,20 +327,31 @@ function bindOf(a, bone) {   // a bone's rest-pose matrix in its skinned mesh's 
   return m;
 }
 function holdProp(a, spec, src) {
-  if (a.prop) { a.prop.parent?.remove(a.prop); a.prop = null; }
-  if (!spec || spec === "none" || !src) return;
+  // one prop per slot (right hand, left hand, head); "none" clears them all, {prop: "none", hand} clears one hand
+  a.props ||= {};
+  if (!spec || spec === "none") { for (const h of Object.values(a.props)) h?.parent?.remove(h); a.props = {}; a.prop = null; return; }
+  const g = GRIP[spec.prop] || GRIP._default, slot = g.bone ? g.bone : (spec.hand === "left" ? "left" : "right");
+  if (a.props[slot]) { a.props[slot].parent?.remove(a.props[slot]); a.props[slot] = null; }
+  if (spec.prop === "none" || !src) return;
+  if (g.bone) {   // worn: parented to that bone (no hand mirroring)
+    let bone = null; a.root.traverse(o => { if (!bone && o.isBone && o.name.endsWith(g.bone)) bone = o; }); if (!bone) return;
+    bone.updateMatrixWorld(true); const s = bone.getWorldScale(new V()), h = new THREE.Group();
+    h.matrixAutoUpdate = false; h.matrix.copy(new THREE.Matrix4().makeScale(1 / s.x, 1 / s.y, 1 / s.z)
+      .multiply(new THREE.Matrix4().compose(new V(...g.pos), new Q().setFromEuler(new THREE.Euler(...g.rot.map(d => d * Math.PI / 180))), new V(1, 1, 1).multiplyScalar(g.scale || 1))));
+    h.name = "prop:" + spec.prop; h.add(src.clone()); bone.add(h); a.props[slot] = h; return;
+  }
   const left = spec.hand === "left", R = a.bones.RightHand, hand = left ? a.bones.LeftHand : R; if (!hand) return;
-  const g = GRIP[spec.prop] || GRIP._default, holder = new THREE.Group();
+  const holder = new THREE.Group();
   hand.updateMatrixWorld(true); const s = hand.getWorldScale(new V());
   // the grip in the right hand's space; the left hand gets its mirror image through the rest pose (left/right is x)
   let m = new THREE.Matrix4().makeScale(1 / s.x, 1 / s.y, 1 / s.z)
-    .multiply(new THREE.Matrix4().compose(new V(...g.pos), new Q().setFromEuler(new THREE.Euler(...g.rot.map(d => d * Math.PI / 180))), new V(1, 1, 1)));
+    .multiply(new THREE.Matrix4().compose(new V(...g.pos), new Q().setFromEuler(new THREE.Euler(...g.rot.map(d => d * Math.PI / 180))), new V(1, 1, 1).multiplyScalar(g.scale || 1)));
   if (left) {
     const rb = bindOf(a, R), lb = bindOf(a, hand);
     if (rb && lb) m = lb.invert().multiply(new THREE.Matrix4().makeScale(-1, 1, 1)).multiply(rb).multiply(m);
   }
   holder.matrixAutoUpdate = false; holder.matrix.copy(m);
-  holder.name = "prop:" + spec.prop; holder.add(src.clone()); hand.add(holder); a.prop = holder;
+  holder.name = "prop:" + spec.prop; holder.add(src.clone()); hand.add(holder); a.props[slot] = holder; a.prop = holder;
 }
 const propSrc = {};   // id -> loaded piece, filled before playback so beats can attach synchronously
 
