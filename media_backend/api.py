@@ -10,13 +10,13 @@ from typing import Any
 from pathlib import Path
 
 import anthropic
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
 from . import __version__, ops, storage
-from . import craft, remote, settings_file, unreal, watch
+from . import craft, remote, settings_file, talk, unreal, watch
 from .assistant import AssistantNotConfigured, ChatNotFound, ChatResult, get_assistant
 from .config import get_settings
 from .jobs import Job, get_queue
@@ -614,6 +614,65 @@ def create_app() -> FastAPI:
         if not f.is_file():
             raise HTTPException(404, "No such file")
         return FileResponse(f)
+
+    # ------------------------------------------------------------ Talk: a 3D character answers you live
+
+    @app.post("/talk")
+    def talk_turn(
+        text: str = Form(""), character: str = Form("teen"), voice: str = Form("am_puck"),
+        history: str = Form(""), persona: str = Form(""), audio: UploadFile | None = File(None),
+        _: User = Depends(current_user),
+    ):
+        """One turn: a recording (webm/ogg/wav) or text in; the character's line, voice and mouth shapes out.
+        `history` is the last few turns as JSON [{role: user|assistant, text}]; nothing is kept on the server."""
+        if not talk.STAGE_NAME.fullmatch(character):
+            raise HTTPException(422, "Unknown character")
+        try:
+            turns = talk.clean_history(history)
+        except talk.TalkError as e:
+            raise HTTPException(422, str(e))
+        heard = text.strip()[:1000]
+        if audio is not None and audio.filename:
+            try:
+                rec = storage.save_stream(audio.filename or "talk.webm", audio.file, source="talk")
+            except ValueError as e:
+                raise HTTPException(413, str(e))
+            try:
+                heard = talk.hear(rec.id)
+            finally:
+                storage.delete(rec.id)   # the recording isn't needed once it's heard
+        if not heard:
+            raise HTTPException(422, "Didn't catch anything. Hold the button while you talk, or type instead.")
+        try:
+            answer = talk.reply(heard, turns, persona or talk.persona_for(character))
+        except AssistantNotConfigured as e:
+            raise HTTPException(503, str(e))
+        except talk.TalkError as e:
+            raise HTTPException(502, str(e))
+        except anthropic.RateLimitError:
+            raise HTTPException(429, "Claude is rate limited; try again shortly.")
+        except anthropic.APIStatusError as e:
+            raise HTTPException(502, f"Claude API error ({e.status_code}): {e.message}")
+        except anthropic.APIConnectionError:
+            raise HTTPException(502, "Couldn't reach the Claude API.")
+        line = talk.speak_line(answer["say"], voice)
+        return {"heard": heard, "say": answer["say"], "gesture": answer["gesture"], "character": character,
+                "audio_url": f"/files/{line['file_id']}/content?inline=true", "file_id": line["file_id"],
+                "duration": line["duration"], "cues": line["cues"], "words": line["words"]}
+
+    @app.get("/stages")
+    def stages_list(_: User = Depends(current_user)):
+        from .scene import list_stages
+
+        return {"stages": list_stages()}
+
+    @app.get("/stages/{name}/{path:path}", include_in_schema=False)
+    def stage_file(name: str, path: str = "", _: User = Depends(current_user)):
+        """A stage's files (its talking viewer and assets), read-only, for signed-in people."""
+        f = talk.stage_file(name, path)
+        if f is None:
+            raise HTTPException(404, "No such stage file")
+        return FileResponse(f, headers={"Cache-Control": "no-cache"} if f.suffix == ".html" else None)
 
     @app.get("/assistant/info")
     def assistant_info():

@@ -506,7 +506,9 @@ function showView(view) {
   document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.view === view)));
   document.querySelectorAll(".view-craft").forEach((el) => { el.hidden = view !== "craft"; });
   document.querySelectorAll(".view-media").forEach((el) => { el.hidden = view !== "media"; });
+  document.querySelectorAll(".view-talk").forEach((el) => { el.hidden = view !== "talk"; });
   store.set("mb_view", view);
+  if (view === "talk") loadTalk();
 }
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showView(t.dataset.view)));
 
@@ -988,13 +990,143 @@ async function boot() {
     await loadFiles();
     loadChatList();
     loadCraft();
-    showView(store.get("mb_view") === "media" ? "media" : "craft");
+    showView(["media", "talk"].includes(store.get("mb_view")) ? store.get("mb_view") : "craft");
     pill.textContent = "Workshop open"; pill.className = "pill ok";
     if (!log.children.length) greet();
   } catch (e) {
     if ($("#login").hidden) { pill.textContent = "Server offline"; pill.className = "pill bad"; }
   }
 }
+
+/* ================================================================ talk */
+// The stage page (a stage's index.html, the talking viewer) runs in the iframe in embed mode; this page records or
+// takes text, asks POST /talk, then hands the reply's voice, mouth shapes and gesture to the stage.
+const talkState = { loaded: false, history: [], busy: false, rec: null, chunks: [], recStart: 0 };
+
+async function loadTalk() {
+  if (talkState.loaded) return;
+  talkState.loaded = true;
+  let stages = [];
+  try { stages = (await api("/stages")).stages || []; } catch { /* shown as "no stage" */ }
+  const sel = $("#talk-stage");
+  sel.replaceChildren(...stages.map((n) => h("option", { value: n, text: n[0].toUpperCase() + n.slice(1) })));
+  $("#talk-empty").hidden = stages.length > 0;
+  $("#talk-frame").hidden = !stages.length;
+  $("#talk-send").disabled = $("#talk-mic").disabled = !stages.length;
+  if (!stages.length) return;
+  const saved = store.get("mb_talk_stage");
+  setTalkStage(stages.includes(saved) ? saved : stages.includes("teen") ? "teen" : stages[0]);
+  const voice = store.get("mb_talk_voice");
+  if (voice && [...$("#talk-voice").options].some((o) => o.value === voice)) $("#talk-voice").value = voice;
+}
+
+function setTalkStage(name) {
+  $("#talk-stage").value = name;
+  $("#talk-frame").src = `/stages/${encodeURIComponent(name)}/index.html?embed=1`;
+  store.set("mb_talk_stage", name);
+  talkState.history = [];
+  $("#talk-log").replaceChildren();
+}
+$("#talk-stage").addEventListener("change", (e) => setTalkStage(e.target.value));
+$("#talk-voice").addEventListener("change", (e) => store.set("mb_talk_voice", e.target.value));
+
+function talkTurn(who, text) {
+  const log = $("#talk-log");
+  log.append(h("p", { class: `turn ${who}` }, h("small", { text: who === "you" ? "You" : $("#talk-stage").value || "Them" }), text));
+  log.scrollTop = log.scrollHeight;
+}
+
+async function talkSend({ text = "", audio = null }) {
+  if (talkState.busy || (!text.trim() && !audio)) return;
+  talkState.busy = true;
+  $("#talk-send").disabled = true;
+  const status = $("#talk-status");
+  status.textContent = audio ? "Listening…" : "Thinking…";
+  setBusy(1);
+  try {
+    const fd = new FormData();
+    fd.append("character", $("#talk-stage").value);
+    fd.append("voice", $("#talk-voice").value);
+    fd.append("history", JSON.stringify(talkState.history.slice(-8)));
+    if (audio) fd.append("audio", audio, `talk.${(audio.type.split("/")[1] || "webm").split(";")[0]}`);
+    else fd.append("text", text.trim());
+    const r = await api("/talk", { method: "POST", body: fd });
+    talkTurn("you", r.heard);
+    talkTurn("them", r.say);
+    talkState.history.push({ role: "user", text: r.heard }, { role: "assistant", text: r.say });
+    talkState.history = talkState.history.slice(-8);
+    const res = await fetch(r.audio_url, { credentials: "same-origin" });
+    if (!res.ok) throw new Error("Couldn't fetch the voice");
+    const buf = await res.arrayBuffer();
+    const stage = $("#talk-frame").contentWindow;
+    status.textContent = "";
+    if (stage && stage.__ready === true && stage.__speakLine) {
+      if (r.gesture && r.gesture !== "none") stage.__play(r.gesture);
+      await stage.__speakLine({ text: r.say, duration: r.duration, cues: r.cues, words: r.words }, buf);
+    } else {
+      new Audio(r.audio_url).play().catch(() => {});   // stage still loading: at least say it
+    }
+  } catch (e) {
+    status.textContent = e.message;
+  } finally {
+    setBusy(-1);
+    talkState.busy = false;
+    $("#talk-send").disabled = false;
+  }
+}
+
+$("#talk-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = $("#talk-input");
+  const text = input.value;
+  input.value = "";
+  talkSend({ text });
+});
+
+// Push to talk: hold the button (or the space bar outside the text box) while speaking.
+async function talkRecStart() {
+  if (talkState.rec || talkState.busy) return;
+  talkState.holding = true;
+  const mic = $("#talk-mic");
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    $("#talk-status").textContent = "This browser can't record here; type instead.";
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const type = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find((t) => MediaRecorder.isTypeSupported(t));
+    const rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    talkState.rec = rec; talkState.chunks = []; talkState.recStart = performance.now();
+    rec.ondataavailable = (e) => { if (e.data.size) talkState.chunks.push(e.data); };
+    rec.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const long = performance.now() - talkState.recStart > 350;
+      const blob = new Blob(talkState.chunks, { type: rec.mimeType || "audio/webm" });
+      talkState.rec = null;
+      mic.setAttribute("aria-pressed", "false"); mic.textContent = "🎤 Hold to talk";
+      if (long && blob.size) talkSend({ audio: blob });
+      else $("#talk-status").textContent = "Hold the button while you talk.";
+    };
+    rec.start();
+    mic.setAttribute("aria-pressed", "true"); mic.textContent = "● Listening… let go to send";
+    if (!talkState.holding) rec.stop();   // let go while the microphone was starting
+  } catch (e) {
+    $("#talk-status").textContent = e.name === "NotAllowedError" ? "Builder isn't allowed to use the microphone; type instead." : `Microphone: ${e.message}`;
+  }
+}
+function talkRecStop() { talkState.holding = false; if (talkState.rec && talkState.rec.state !== "inactive") talkState.rec.stop(); }
+const talkMic = $("#talk-mic");
+talkMic.addEventListener("pointerdown", (e) => { e.preventDefault(); talkMic.setPointerCapture?.(e.pointerId); talkRecStart(); });
+talkMic.addEventListener("pointerup", talkRecStop);
+talkMic.addEventListener("pointercancel", talkRecStop);
+talkMic.addEventListener("keydown", (e) => { if ((e.key === " " || e.key === "Enter") && !e.repeat) { e.preventDefault(); talkRecStart(); } });
+talkMic.addEventListener("keyup", (e) => { if (e.key === " " || e.key === "Enter") talkRecStop(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key !== " " || e.repeat || $("#tab-talk").getAttribute("aria-selected") !== "true") return;
+  if (e.target.closest("input, textarea, select, button, dialog")) return;
+  e.preventDefault(); talkRecStart();
+});
+document.addEventListener("keyup", (e) => { if (e.key === " " && talkState.rec && document.activeElement !== talkMic) talkRecStop(); });
 
 runIntro();
 boot();

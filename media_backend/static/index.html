@@ -123,6 +123,7 @@
     <nav class="tabs" role="tablist" aria-label="Builder areas">
       <button type="button" role="tab" class="tab" id="tab-craft" data-view="craft" aria-selected="true">🏗️ Craft</button>
       <button type="button" role="tab" class="tab" id="tab-media" data-view="media" aria-selected="false">🎬 Audio &amp; video</button>
+      <button type="button" role="tab" class="tab" id="tab-talk" data-view="talk" aria-selected="false">💬 Talk</button>
     </nav>
 
     <main class="layout">
@@ -215,6 +216,37 @@
 
         <h3 class="section-label">Jobs</h3>
         <div id="jobs" class="jobs"><div class="muted">No jobs yet</div></div>
+      </section>
+
+      <!-- Talk: a 3D character answers you live, with Builder's local voice and lip-sync -->
+      <section class="panel talk view-talk" aria-labelledby="talk-h" hidden>
+        <div class="panel-head">
+          <h2 id="talk-h">Talk</h2>
+          <div class="head-actions">
+            <label class="sr-only" for="talk-stage">Character</label>
+            <select id="talk-stage" class="talk-select"></select>
+            <label class="sr-only" for="talk-voice">Voice</label>
+            <select id="talk-voice" class="talk-select">
+              <option value="am_puck">Teen boy (am_puck)</option><option value="am_liam">Warm man (am_liam)</option>
+              <option value="af_heart">Warm woman (af_heart)</option><option value="bm_george">UK man (bm_george)</option>
+              <option value="bf_emma">UK woman (bf_emma)</option>
+            </select>
+          </div>
+        </div>
+        <div class="talk-stage-box">
+          <iframe id="talk-frame" title="The character's stage" allow="autoplay"></iframe>
+          <div id="talk-empty" class="build-empty talk-empty" hidden>
+            <p><strong>No stage yet.</strong> A stage is a folder with the talking viewer and its character, in
+            Builder's <code>stages</code> folder. Build one with <code>tools/makehuman/make_stage.py</code>.</p>
+          </div>
+        </div>
+        <form id="talk-form" class="talk-form">
+          <button type="button" id="talk-mic" class="btn talk-mic" aria-pressed="false" title="Hold to talk (or press and hold the space bar)">🎤 Hold to talk</button>
+          <input id="talk-input" maxlength="300" autocomplete="off" placeholder="…or type something to say to them" aria-label="Say something">
+          <button class="btn primary" type="submit" id="talk-send">Say it</button>
+        </form>
+        <p id="talk-status" class="muted small-text" aria-live="polite">Free and on this computer: Whisper hears you, Claude answers in character, Kokoro speaks with lip-sync.</p>
+        <div id="talk-log" class="talk-log" aria-live="polite"></div>
       </section>
 
       <!-- Assistant -->

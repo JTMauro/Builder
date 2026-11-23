@@ -27,6 +27,9 @@ kbd{font:12px var(--mono);border:1px solid var(--line);border-radius:4px;padding
 /* scene mode (Builder renders a video from this page): just the stage, filling the window */
 html.scene body{padding:0}html.scene .wrap>:not(#stage){display:none}
 html.scene #stage{position:fixed;inset:0;max-height:none;aspect-ratio:auto;border:0;border-radius:0}html.scene #now,html.scene #cap,html.scene #status{display:none}
+/* embed mode (?embed=1, Builder's Talk page): just the stage with its captions; the host page has the controls */
+html.embed body{padding:0}html.embed .wrap>:not(#stage){display:none}
+html.embed #stage{position:fixed;inset:0;max-height:none;aspect-ratio:auto;border:0;border-radius:0}
 select{font:500 13px var(--body);padding:7px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--fg);max-width:60vw}
 #ask{flex:1 1 220px;min-width:0;font:500 14px var(--body);padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--fg)}
 .note{font-size:12px;color:var(--muted)}
@@ -105,6 +108,8 @@ import { retarget, gestures, CMU } from "./anim.js";
 const $ = s => document.querySelector(s);
 // scene mode: Builder's scene_video injects window.__scene = { beats, lines, fps } and steps time itself
 const SCENE = window.__scene || null; if (SCENE) document.documentElement.classList.add("scene");
+// embed mode: another page (Builder's Talk page) holds the controls and drives this one through window.__speakLine / __play
+if (!SCENE && new URLSearchParams(location.search).has("embed")) document.documentElement.classList.add("embed");
 let simT = 0; const sceneEvents = [];
 const stage = $("#stage"), status = $("#status"), nowEl = $("#now"), capEl = $("#cap");
 const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: !!(window.__shot || SCENE) });
@@ -296,17 +301,35 @@ function ensureAudio() {
   }
   soundOn = true; $('[data-s="sound"]').setAttribute("aria-pressed", "true");
 }
+const esc = s => String(s).replace(/[<&>]/g, "");
 function say(key) {
-  if (SCENE) { const l = lines[key]; if (l) { speaking = { l, t0: simT }; browsKick = 1; } return; }
-  ensureAudio(); const l = lines[key]; if (!l) return;
-  if (!l.buffer) { l.loading = listener.context.decodeAudioData(b64(l.audio).buffer.slice(0)).then(b => (l.buffer = b)); }
-  Promise.resolve(l.buffer || l.loading).then(buf => {
+  if (SCENE) { const l = lines[key]; if (l) { speaking = { l, t0: simT }; browsKick = 1; } return Promise.resolve(); }
+  ensureAudio(); const l = lines[key]; if (!l) return Promise.resolve();
+  if (!l.buffer && !l.loading) { l.loading = listener.context.decodeAudioData(b64(l.audio).buffer.slice(0)).then(b => (l.buffer = b)); }
+  return Promise.resolve(l.buffer || l.loading).then(buf => {
     if (voice.isPlaying) voice.stop();
+    listener.context.resume();
     voice.setBuffer(buf); voice.play(); speaking = { l, t0: listener.context.currentTime };
-    capEl.innerHTML = l.words.map(w => `<span class="w">${w.w.replace(/[<&>]/g, "")}</span>`).join(" "); capEl.hidden = false;
+    const words = l.words || [];
+    capEl.innerHTML = words.length ? words.map(w => `<span class="w">${esc(w.w)}</span>`).join(" ") : esc(l.text || ""); capEl.hidden = false;
     browsKick = 1;
   });
 }
+// A line made elsewhere (Builder's POST /talk, or any app): { key?, text, duration, cues: [[t, shape]...], words: [{w, s, e}] },
+// with its audio as an ArrayBuffer (or line.audio as base64). It plays through the same positional voice and lip-sync as
+// the built-in lines; resolves when the voice starts.
+let liveN = 0;
+window.__speakLine = (line, audio) => {
+  const l = { key: line.key || "live" + (++liveN), text: line.text || "", duration: +line.duration || 0, cues: line.cues?.length ? line.cues : [[0, "X"]],
+    words: (line.words || []).map(w => ({ w: w.w ?? w.word ?? "", s: w.s ?? w.start ?? 0, e: w.e ?? w.end ?? 0 })), audio: line.audio };
+  if (!SCENE) {
+    ensureAudio();
+    if (audio) l.loading = listener.context.decodeAudioData(audio instanceof ArrayBuffer ? audio.slice(0) : audio.buffer.slice(0)).then(b => (l.buffer = b));
+    else if (!l.audio) return Promise.reject(new Error("no audio for the line"));
+  }
+  lines[l.key] = l;
+  return say(l.key);
+};
 document.getElementById("talk").addEventListener("click", e => { const b = e.target.closest("button"); if (b) say(b.dataset.line); });
 document.getElementById("view").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
@@ -461,7 +484,8 @@ async function chatSend(text) {
   }
 })();
 
-window.__frame = frameView;  window.__say = say; window.__play = play;
+window.__frame = frameView;  window.__say = say;
+window.__play = name => { if (!mixer || !acts[name]) return false; target = null; base = LOOPS.has(name) ? name : "idle"; play(name); return true; };
 
 // scene beats: { t, say, move, view: "body"|"face", walkTo: [x, z], run, face: degrees }
 function runBeats() {

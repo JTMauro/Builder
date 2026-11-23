@@ -77,6 +77,14 @@ def parse_args(argv):
     p.add_argument("--skin-even", type=float, default=0.35,
                    help="0..1, blend the skin texture toward its average tone (hides pale texture patches)")
     p.add_argument("--subdiv", type=int, default=1, help="render subdivision of the body (0 = off)")
+    p.add_argument("--strand-hair", action="store_true",
+                   help="grow real hair strands (Cycles curves) from the scalp, combed to the hair mesh's shape")
+    p.add_argument("--hair-density", type=float, default=60.0, help="strands per cm2 of scalp for --strand-hair")
+    p.add_argument("--hair-length", type=float, default=12.0,
+                   help="longest strand in cm for --strand-hair (strands also end at the hair mesh's edge)")
+    p.add_argument("--hair-melanin", help="M or M,REDNESS (0..1) for --strand-hair (default: from the hair colour)")
+    p.add_argument("--hair-cards", choices=["hide", "keep"], default="hide",
+                   help="with --strand-hair: hide the hair card mesh (default) or render it under the strands")
     p.add_argument("--threads", type=int, default=0, help="CPU threads (0 = all)")
     p.add_argument("--save-blend", help="also save the lit scene as a .blend (for checking in Blender)")
     return p.parse_args(argv)
@@ -405,6 +413,284 @@ def setup_materials(even):
     log("materials:", ", ".join(done))
 
 
+# ---------------------------------------------------------------- strand hair (--strand-hair)
+def world_mesh(o):
+    """Posed (evaluated) mesh of `o` in world space as numpy arrays: vertices, vertex normals,
+    triangles (vertex indices), per-triangle-corner UVs (or None), and a BVH over the triangles."""
+    import numpy as np
+    from mathutils.bvhtree import BVHTree
+    dg = bpy.context.evaluated_depsgraph_get()
+    ev = o.evaluated_get(dg)
+    me = ev.to_mesh()
+    me.calc_loop_triangles()
+    n, nt = len(me.vertices), len(me.loop_triangles)
+    co = np.empty(n * 3, np.float32); me.vertices.foreach_get("co", co)
+    nr = np.empty(n * 3, np.float32); me.vertex_normals.foreach_get("vector", nr)
+    tri = np.empty(nt * 3, np.int32); me.loop_triangles.foreach_get("vertices", tri)
+    loops = np.empty(nt * 3, np.int32); me.loop_triangles.foreach_get("loops", loops)
+    uv = None
+    if me.uv_layers.active is not None:
+        luv = np.empty(len(me.loops) * 2, np.float32); me.uv_layers.active.data.foreach_get("uv", luv)
+        uv = luv.reshape(-1, 2)[loops].reshape(-1, 3, 2)
+    mw = np.array(ev.matrix_world, dtype=np.float64)
+    co = co.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3]
+    nr = nr.reshape(-1, 3) @ np.linalg.inv(mw[:3, :3])
+    nr /= np.maximum(np.linalg.norm(nr, axis=1, keepdims=True), 1e-9)
+    tri = tri.reshape(-1, 3)
+    ev.to_mesh_clear()
+    bvh = BVHTree.FromPolygons(co.tolist(), tri.tolist())
+    return {"co": co, "nr": nr, "tri": tri, "uv": uv, "bvh": bvh}
+
+
+def hair_melanin(rgb):
+    """Melanin and redness for Cycles' Principled Hair from a hair colour (linear RGB, e.g. the mean of the
+    hair texture). Calibrated by eye on renders: MakeHuman light brown (sRGB .40,.315,.235) -> 0.45, 0.28;
+    near-black -> 0.9; blonde -> about 0.2. Redness follows the red/blue ratio (ginger -> 1)."""
+    r, g, b = (max(float(c), 1e-4) for c in rgb)
+    lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    mel = min(0.97, max(0.05, -0.19 * math.log(lum)))
+    red = min(1.0, max(0.0, (math.log(r / b) - 0.4) / 2.6))
+    return mel, red
+
+
+def strand_hair_material(rgb, melanin=None):
+    m = bpy.data.materials.new("Hair strands")
+    m.use_nodes = True
+    nt = m.node_tree
+    for n in list(nt.nodes):
+        if n.type != "OUTPUT_MATERIAL":
+            nt.nodes.remove(n)
+    out = next(n for n in nt.nodes if n.type == "OUTPUT_MATERIAL")
+    h = nt.nodes.new("ShaderNodeBsdfHairPrincipled")
+    h.parametrization = "MELANIN"
+    rough = 0.32
+    mel, red = melanin if melanin else hair_melanin(rgb)
+    h.inputs["Melanin"].default_value = mel
+    h.inputs["Melanin Redness"].default_value = red
+    h.inputs["Roughness"].default_value = rough
+    h.inputs["Radial Roughness"].default_value = 0.35
+    h.inputs["Coat"].default_value = 0.05
+    h.inputs["IOR"].default_value = 1.55
+    h.inputs["Random Color"].default_value = 0.12       # per-strand melanin variation
+    h.inputs["Random Roughness"].default_value = 0.15
+    nt.links.new(h.outputs[0], out.inputs["Surface"])
+    log(f"strand hair: melanin {mel:.2f}, redness {red:.2f} (from hair colour "
+        f"{', '.join(f'{c:.3f}' for c in rgb)} linear)")
+    return m
+
+
+def card_texture(card):
+    """The hair card's base-colour image as a float array (H, W, 4), or None."""
+    import numpy as np
+    m = card.active_material
+    if m is None or m.node_tree is None:
+        return None
+    b = next((n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    tex = linked_image(m.node_tree, b.inputs["Base Color"]) if b else None
+    if tex is None or tex.image is None:
+        return None
+    im = tex.image
+    card_texture.is_float = im.is_float
+    px = np.empty(im.size[0] * im.size[1] * 4, np.float32)
+    im.pixels.foreach_get(px)
+    return px.reshape(im.size[1], im.size[0], 4)
+
+
+def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
+    """Grow Cycles hair curves from the scalp (the skin under the card mesh), combed to the card's shape.
+
+    Guides (~1 per 0.2 cm2) walk from each root along a flow field (away from the crown, falling with
+    gravity on the sides), staying between the scalp and the card surface at a per-strand layer depth;
+    a guide ends at the card's edge or where the card's texture turns transparent. Children (`density`
+    per cm2) interpolate their 3 nearest guides with a little clumping, length variation and frizz, and
+    are kept outside the scalp and inside the card surface (no spikes)."""
+    import numpy as np
+    from mathutils import geometry, kdtree
+    t0 = time.time()
+    rng = np.random.default_rng(seed)
+    B, C = world_mesh(body), world_mesh(card)
+    img = card_texture(card)
+
+    # hair colour: mean of the card texture's opaque texels (8-bit pixels are sRGB-encoded)
+    rgb = (0.12, 0.08, 0.05)
+    if img is not None:
+        op = img[::4, ::4].reshape(-1, 4)
+        op = op[op[:, 3] > 0.6, :3]
+        if len(op):
+            c = op.mean(0)
+            if not card_texture.is_float:
+                c = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+            rgb = tuple(float(x) for x in c)
+
+    # scalp = body vertices whose outward normal ray meets the card within 4.5 cm (as gen.py paints it)
+    head = bone(arm, "Head")
+    head_z = (arm.matrix_world @ head.head).z if head else C["co"][:, 2].min()
+    cand = np.nonzero(B["co"][:, 2] > head_z - 0.03)[0]
+    flag = np.zeros(len(B["co"]), bool)
+    for i in cand:
+        p, n = Vector(B["co"][i]), Vector(B["nr"][i])
+        if C["bvh"].ray_cast(p + n * 0.0005, n, 0.045)[0] is not None:
+            flag[i] = True
+    st = B["tri"][flag[B["tri"]].all(1)]
+    if not len(st):
+        log("strand hair: no scalp found under the hair mesh, skipped")
+        return None
+    P = B["co"][st]                                     # (T, 3, 3)
+    area = 0.5 * np.linalg.norm(np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0]), axis=1)
+    scalp_cm2 = area.sum() * 1e4
+
+    def sample(count):
+        ti = rng.choice(len(st), size=count, p=area / area.sum())
+        u, v = rng.random(count), rng.random(count)
+        flip = u + v > 1
+        u[flip], v[flip] = 1 - u[flip], 1 - v[flip]
+        w = np.stack([1 - u - v, u, v], 1)[:, :, None]
+        pos = (P[ti] * w).sum(1)
+        nrm = (B["nr"][st[ti]] * w).sum(1)
+        nrm /= np.linalg.norm(nrm, axis=1, keepdims=True)
+        return pos - nrm * 0.0008, nrm                   # roots sit just under the skin
+
+    # crown: where a ray from the head's centre up and slightly back meets the card
+    centre = Vector(C["co"].mean(0))
+    hit = C["bvh"].ray_cast(centre, Vector((0, 0.35, 1)).normalized(), 1.0)[0]
+    crown = hit if hit is not None else Vector(C["co"][C["co"][:, 2].argmax()])
+
+    def flow(q, sn):
+        v = q - crown
+        v -= sn * v.dot(sn)
+        g = Vector((0, 0, -1.0)); g -= sn * g.dot(sn)
+        f = (v.normalized() if v.length > 1e-6 else g) + g * 0.6
+        return f.normalized() if f.length > 1e-6 else g
+
+    def alpha_at(fi, s):
+        if img is None or C["uv"] is None:
+            return 1.0
+        a, b_, c = (Vector(C["co"][k]) for k in C["tri"][fi])
+        uvt = [Vector((*C["uv"][fi][k], 0.0)) for k in range(3)]
+        uvp = geometry.barycentric_transform(s, a, b_, c, *uvt)
+        h, w = img.shape[:2]
+        x = int((uvp.x % 1.0) * (w - 1)); y = int((uvp.y % 1.0) * (h - 1))
+        return float(img[y, x, 3])
+
+    step, ramp, lmax = 0.004, 0.015, length_cm / 100.0
+    NP = 12
+
+    def grow(root, nrm, layer):
+        p = Vector(root); n = Vector(nrm)
+        s, sn, fi, _ = C["bvh"].find_nearest(p)
+        d = (n * 0.7 + flow(p, sn)).normalized()
+        pts, L = [p.copy()], 0.0
+        while L < lmax:
+            q = p + d * step
+            s, sn, fi, _ = C["bvh"].find_nearest(q)
+            b, bn, _, _ = B["bvh"].find_nearest(q)
+            if s is None or b is None:
+                break
+            gap = s - b
+            ax = gap.normalized() if gap.length > 1e-4 else bn
+            if ax.dot(bn) < 0:          # card below the skin here: hug the skin
+                ax = bn
+            t = min(1.0, (L + step) / ramp)
+            want = max(0.0015, gap.length * layer * t)
+            q = q + ax * ((b + ax * want - q).dot(ax)) * 0.85
+            off = (q - s) - sn * (q - s).dot(sn)
+            if L > 0.01 and (off.length > 0.007 or alpha_at(fi, s) < 0.3):
+                break                    # past the card's edge, or where its texture is transparent
+            dn = (q - p)
+            if dn.length < 1e-6:
+                break
+            d = (dn.normalized() * 0.55 + flow(q, sn) * 0.45).normalized()
+            L += dn.length
+            pts.append(q.copy()); p = q
+        if len(pts) < 3:
+            return None
+        a = np.array(pts)
+        seg = np.r_[0, np.cumsum(np.linalg.norm(np.diff(a, axis=0), axis=1))]
+        u = np.linspace(0, seg[-1], NP)
+        return np.stack([np.interp(u, seg, a[:, k]) for k in range(3)], 1)
+
+    ng = int(max(200, min(6000, scalp_cm2 * 5)))
+    groots, gn = sample(ng)
+    layers = 1.0 - 0.8 * rng.random(ng) ** 2              # most guides near the card surface (visible)
+    G, R = [], []
+    for i in range(ng):
+        g = grow(groots[i], gn[i], layers[i])
+        if g is not None:
+            G.append(g); R.append(groots[i])
+    if not G:
+        log("strand hair: no guide could grow, skipped")
+        return None
+    G, R = np.array(G), np.array(R)
+    log(f"strand hair: scalp {scalp_cm2:.0f} cm2, {len(G)} guides ({time.time() - t0:.1f}s)")
+
+    # children: blend of the 3 nearest guides, a little clumping toward the nearest
+    nc = int(scalp_cm2 * density)
+    croots, _ = sample(nc)
+    kd = kdtree.KDTree(len(R))
+    for i, r in enumerate(R):
+        kd.insert(r, i)
+    kd.balance()
+    idx = np.zeros((nc, 3), np.int64); wts = np.zeros((nc, 3))
+    for i in range(nc):
+        res = kd.find_n(croots[i], 3)
+        for k, (_, j, dd) in enumerate(res):
+            idx[i, k] = j; wts[i, k] = 1.0 / (dd * dd + 1e-6)
+        if len(res) < 3:
+            idx[i, len(res):] = idx[i, 0]
+    wts /= wts.sum(1, keepdims=True)
+    S = np.linspace(0, 1, NP)
+    shape = (G[idx] * wts[:, :, None, None]).sum(1)                 # (nc, NP, 3)
+    base = shape[:, :1]
+    clump = 0.35 + 0.3 * rng.random((nc, 1, 1))
+    near = G[idx[:, 0]]
+    shape = shape + (near - shape) * (clump * S[None, :, None] ** 1.5)
+    shape = shape + (croots[:, None] - base) * (1 - 0.6 * S[None, :, None])
+    # length variation: keep the first 75-100 % of the curve, resampled to NP points
+    lf = 0.75 + 0.25 * rng.random(nc)
+    x = S[None, :] * lf[:, None] * (NP - 1)
+    i0 = np.minimum(np.floor(x).astype(int), NP - 2); fr = (x - i0)[:, :, None]
+    ar = np.arange(nc)[:, None]
+    shape = shape[ar, i0] * (1 - fr) + shape[ar, i0 + 1] * fr
+    # frizz: smooth random offsets growing toward the tip (about 1 mm)
+    fz = rng.normal(0, 0.0007, (nc, 3, 3))
+    tt = S[None, :, None]
+    shape += (fz[:, 0, None] * np.sin(3.1 * tt) + fz[:, 1, None] * np.sin(6.3 * tt + 1)) * tt
+    # stay outside the scalp and inside the card surface (no strand pokes out as a spike)
+    for i in range(nc):
+        for k in range(1, NP):
+            q = Vector(shape[i, k])
+            b, bn, _, _ = B["bvh"].find_nearest(q)
+            s, _, _, _ = C["bvh"].find_nearest(q)
+            if b is None or s is None:
+                continue
+            ax = s - b
+            if ax.length < 1e-4:
+                ax = bn
+            ax.normalize()
+            if ax.dot(bn) < 0:
+                ax = bn
+            h = (q - b).dot(ax); top = max((s - b).dot(ax), 0.0015)
+            if h < 0.0012:
+                q += ax * (0.0012 - h)
+            elif h > top + 0.0015:
+                q -= ax * (h - top - 0.0015)
+            else:
+                continue
+            shape[i, k] = q
+    log(f"strand hair: {nc} strands ({time.time() - t0:.1f}s)")
+
+    cv = bpy.data.hair_curves.new("Hair strands")
+    cv.add_curves([NP] * nc)
+    cv.attributes["position"].data.foreach_set("vector", shape.astype(np.float32).ravel())
+    rad = cv.attributes.get("radius") or cv.attributes.new("radius", "FLOAT", "POINT")
+    r = np.tile(0.000055 * (1 - 0.65 * S ** 2), nc).astype(np.float32)
+    rad.data.foreach_set("value", r)
+    cv.materials.append(strand_hair_material(rgb, melanin))
+    o = bpy.data.objects.new("Hair strands", cv)
+    bpy.context.scene.collection.objects.link(o)
+    return o
+
+
 # ---------------------------------------------------------------- scene: world, lights, backdrop
 def world(path, strength, rotate):
     w = bpy.data.worlds.new("Studio")
@@ -640,6 +926,18 @@ def main():
     if a.smile is not None or a.shape_key:
         set_shape_keys(body, meshes, a.smile, a.shape_key)
     setup_materials(a.skin_even)
+    if a.strand_hair:
+        card = next((o for o in meshes if mat_kind(o) == "hair"), None)
+        if card is None or arm is None:
+            log("--strand-hair: needs a hair mesh and the rig, skipped")
+        else:
+            mel = tuple(float(x) for x in a.hair_melanin.split(",")) if a.hair_melanin else None
+            if mel and len(mel) == 1:
+                mel = (mel[0], 0.4)
+            if strand_hair(body, card, arm, a.hair_density, a.hair_length, mel) is not None:
+                bpy.context.scene.cycles_curves.shape = "THICK"
+                if a.hair_cards == "hide":
+                    card.hide_render = True
     if a.subdiv > 0:
         for o in meshes:
             if mat_kind(o) == "skin":  # body only: subdividing the clothes balloons them
