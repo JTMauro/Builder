@@ -167,3 +167,17 @@ def speak_line(say: str, voice_name: str) -> dict[str, Any]:
     cues = [[c["start"], c["value"]] for c in doc.get("mouthCues", [])]
     words = [{"w": w["word"].strip(), "s": round(w["start"], 3), "e": round(w["end"], 3)} for w in doc.get("words", [])]
     return {"file_id": audio.id, "duration": duration, "cues": cues, "words": words}
+
+
+def stage_info(name: str) -> dict[str, Any] | None:
+    """What the Studio editor needs about a stage: its sets, character models, moves and whether it has studio.html."""
+    from .scene import stage_moves, stages_dir
+
+    if not STAGE_NAME.fullmatch(name or ""):
+        return None
+    root = stages_dir() / name
+    if not (root / "index.html").is_file():
+        return None
+    sets = sorted(d.name for d in (root / "sets").iterdir() if (d / "set.json").is_file()) if (root / "sets").is_dir() else []
+    models = sorted(f.stem for f in (root / "models").glob("*.json") if f.stem != "light") if (root / "models").is_dir() else []
+    return {"name": name, "studio": (root / "studio.html").is_file(), "sets": sets, "models": models, "moves": stage_moves(name)}

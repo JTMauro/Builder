@@ -7,8 +7,9 @@
 html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px system-ui,sans-serif;overflow:hidden}
 #stage{position:fixed;inset:0}#stage canvas{display:block;width:100%;height:100%}
 #status{position:fixed;left:12px;bottom:10px;opacity:.75}
+#cap{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);max-width:min(80vw,640px);padding:6px 12px;border-radius:8px;background:rgba(0,0,0,.6);color:#fff;font:500 15px/1.35 system-ui,sans-serif;text-align:center}
 </style></head><body>
-<div id="stage"></div><div id="status">Loading…</div>
+<div id="stage"></div><div id="status">Loading…</div><div id="cap" hidden></div>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <script type="module">
 // Builder Studio: several characters on a set, with camera shots and cuts.
@@ -42,8 +43,57 @@ const DEMO = {   // what the page plays when opened on its own
     { t: 6, shot: { type: "close", actor: "a", move: 1.5 } }, { t: 6.2, actor: "a", move: "shrug" },
     { t: 9, shot: { type: "two" } }, { t: 9.3, actor: "b", move: "dance" }, { t: 9.3, actor: "a", move: "agree" }],
 };
-const SCENE = window.__scene || null, S = SCENE || DEMO, live = !SCENE;
-const $ = s => document.querySelector(s), status = $("#status");
+// preview mode (Builder's Studio tab plays a scene live, without rendering): studio.html?preview waits for
+// { type: "builder-scene", scene } from the page that holds it (same origin), or studio.html?scene=<url of a JSON>.
+// The scene is scene_video's params (beats with say text, walk_to, hold, cast, set, quality); lines have no audio, so
+// the text shows as a caption and the mouth follows the letters.
+const QS = new URLSearchParams(location.search);
+async function previewParams() {
+  if (window.__scene) return null;
+  if (QS.get("scene")) {
+    const u = new URL(QS.get("scene"), location.href); if (u.origin !== location.origin) throw new Error("scene must come from this site");
+    const res = await fetch(u); if (!res.ok) throw new Error("scene returned " + res.status); return res.json();
+  }
+  if (!QS.has("preview")) return null;
+  document.querySelector("#status").textContent = "Waiting for a scene…";
+  return new Promise(ok => {
+    addEventListener("message", e => { if (e.origin === location.origin && e.data?.type === "builder-scene") ok(e.data.scene); });
+    if (parent !== window) parent.postMessage({ type: "studio-waiting" }, location.origin);
+  });
+}
+function textCues(text, dur) {   // mouth shapes from the letters, spread over the time the line takes
+  const map = c => /[mbp]/.test(c) ? "A" : /[fv]/.test(c) ? "G" : /[ouw]/.test(c) ? "F" : /a/.test(c) ? "D" : /[ei]/.test(c) ? "C" : /l/.test(c) ? "H" : /[\s.,!?]/.test(c) ? "X" : "B";
+  const chars = text.toLowerCase().split(""), per = dur / Math.max(1, chars.length), cues = [];
+  chars.forEach((c, i) => { const v = map(c); if (!cues.length || cues[cues.length - 1][1] !== v) cues.push([+(i * per).toFixed(3), v]); });
+  return cues;
+}
+const propSpec = b => (b.prop != null ? b.prop : b.hold !== null && typeof b.hold === "object" || b.hold === "none" ? b.hold : undefined);
+function fromParams(p) {   // scene_video params -> a timed studio scene (the same timing rules as scene_video)
+  const cast = (p.cast?.length ? p.cast : [{ id: "a", model: "teen" }]).map(c => ({ id: c.id, model: c.model || "teen", at: c.at || [0, 0], face: +c.face || 0 }));
+  const beats = [], lines = [], pos = Object.fromEntries(cast.map(c => [c.id, c.at]));
+  let cursor = 0.4, end = 0;
+  (p.beats || []).forEach((b, i) => {
+    const t = b.at ?? cursor, beat = { t }, actor = b.actor || cast[0].id;
+    for (const k of ["move", "view", "face", "actor", "look", "shot"]) if (b[k] != null && b[k] !== "") beat[k] = b[k];
+    const ps = propSpec(b); if (ps != null && ps !== "") beat.prop = ps;
+    let dur = b.move || b.walk_to ? (b.hold ?? 2.5) : 0.3;
+    if (b.walk_to) {
+      beat.walkTo = b.walk_to; beat.run = !!b.run; const prev = pos[actor] || [0, 0];
+      dur = Math.max(dur, Math.hypot(b.walk_to[0] - prev[0], b.walk_to[1] - prev[1]) / (b.run ? 3.4 : 1.15) + 0.4); pos[actor] = b.walk_to;
+    }
+    if (b.say) {
+      const key = "p" + i, d = Math.max(0.8, b.say.length * 0.062);   // about 16 letters a second
+      lines.push({ key, text: b.say, duration: d, cues: textCues(b.say, d), words: [] }); beat.say = key;
+      dur = Math.max(b.move || b.walk_to ? dur : 0, d + 0.35);
+    }
+    beats.push(beat); cursor = t + dur; end = Math.max(end, cursor);
+  });
+  return { set: p.set || null, quality: p.quality || "film", cast, lines, beats, duration: end + (p.tail ?? 1) };
+}
+const PREVIEW = await previewParams().catch(e => { document.querySelector("#status").textContent = "Could not load the scene: " + e.message; return null; });
+const SCENE = window.__scene || null, S = SCENE || (PREVIEW ? fromParams(PREVIEW) : DEMO), live = !SCENE;
+window.__preview = PREVIEW ? S : null;
+const $ = s => document.querySelector(s), status = $("#status"), capEl = $("#cap");
 const V = THREE.Vector3, Q = THREE.Quaternion, tmpV = new V();
 
 const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: !!SCENE });
@@ -159,10 +209,10 @@ function makeActor(spec, model) {
   group.position.set(spec.at?.[0] || 0, 0, spec.at?.[1] || 0); group.rotation.y = (spec.face || 0) * Math.PI / 180;
   const bones = {}, morphs = [];
   root.traverse(o => {
-    if (o.isBone) for (const n of ["Hips", "Spine1", "Spine2", "Neck", "Head", "LeftFoot", "RightFoot"]) if (o.name.endsWith(n) && !bones[n]) bones[n] = o;
+    if (o.isBone) for (const n of ["Hips", "Spine1", "Spine2", "Neck", "Head", "LeftFoot", "RightFoot", "LeftHand", "RightHand"]) if (o.name.endsWith(n) && !bones[n]) bones[n] = o;
     if (o.isMesh && o.morphTargetDictionary) { o.morphTargetInfluences = o.morphTargetInfluences.slice(); morphs.push(o); }
   });
-  const a = { id: spec.id, model, group, root, bones, morphs, mixer: new THREE.AnimationMixer(root), acts: {}, current: null, base: "idle",
+  const a = { id: spec.id, spec, model, group, root, bones, morphs, mixer: new THREE.AnimationMixer(root), acts: {}, current: null, base: "idle",
     target: null, speaking: null, face: {}, blinkAt: 1 + Math.random() * 2, blinkT: -1, brows: 0, look: "camera", lookW: 0,
     feet: { L: { lo: 9, up: true }, R: { lo: 9, up: true } }, headFwd: new V(0, 0, 1), seed: Math.random() * 10 };
   a.mixer.addEventListener("finished", e => { if (e.action === a.current && !LOOPS.has(a.current._name)) play(a, a.base); });
@@ -183,6 +233,44 @@ function play(a, name, fade = 0.3) {
   if (next === a.current) { if (!LOOPS.has(name)) next.reset().play(); return; }
   next.reset().setEffectiveWeight(1).fadeIn(fade).play(); if (a.current) a.current.fadeOut(fade); a.current = next;
 }
+
+// ---------- props in hand: beat.hold = { prop: id, hand: "right" | "left" } or "none" (beat.prop is the same, for editors
+// that also use hold as seconds). Props live in props/<id>/<id>_1k.gltf at real-world size; each loads once and every
+// actor holding one gets a clone, parented to the hand bone. GRIP places the prop's centre in the right palm (hand-bone
+// space, metres) and turns it (degrees); the left hand mirrors it. node: which piece of a file with several variants.
+const GRIP = {
+  _default: { pos: [0.0, 0.09, 0.035], rot: [0, 0, 0] },
+  football: { node: "football_inflated", pos: [0.0, 0.10, 0.10], rot: [0, 0, 0] },
+  baseball_bat: { pos: [0.0, 0.08, 0.03], rot: [0, 0, 90], grip: [0, 0, -0.55] },
+  classic_laptop: { pos: [0.0, 0.07, 0.17], rot: [90, 0, 0] },
+  binder_notebook: { node: "binder_notebook_closed", pos: [0.0, 0.08, 0.06], rot: [90, 0, 0] },
+  Megaphone_01: { pos: [0.0, 0.09, 0.05], rot: [0, 0, 0] },
+  plastic_bottle_gallon: { pos: [0.0, 0.08, 0.09], rot: [0, 0, 0] },
+};
+const props = {};
+async function loadProp(id) {
+  if (!/^[\w-]{1,64}$/.test(id || "")) return null;
+  props[id] ||= loader.loadAsync(`props/${id}/${id}_1k.gltf`).then(g => {
+    const g0 = GRIP[id] || GRIP._default; let obj = g.scene;
+    if (g0.node) { const n = obj.getObjectByName(g0.node); if (n) { n.parent.remove(n); n.position.set(0, 0, 0); obj = new THREE.Group(); obj.add(n); } }
+    obj.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+    obj.updateMatrixWorld(true);
+    const c = new THREE.Box3().setFromObject(obj).getCenter(new V()), piece = new THREE.Group();   // centre it, plus any grip point
+    obj.position.sub(c); if (g0.grip) obj.position.sub(new V(...g0.grip)); piece.add(obj); return piece;
+  }).catch(e => { console.warn("prop " + id, e); return null; });
+  return props[id];
+}
+function holdProp(a, spec, src) {
+  if (a.prop) { a.prop.parent?.remove(a.prop); a.prop = null; }
+  if (!spec || spec === "none" || !src) return;
+  const left = spec.hand === "left", hand = a.bones[left ? "LeftHand" : "RightHand"]; if (!hand) return;
+  const g = GRIP[spec.prop] || GRIP._default, holder = new THREE.Group(), obj = src.clone();
+  obj.position.set(left ? -g.pos[0] : g.pos[0], g.pos[1], g.pos[2]);
+  obj.rotation.set(...g.rot.map((d, i) => (left && i > 0 ? -d : d) * Math.PI / 180));
+  hand.updateMatrixWorld(true); const s = hand.getWorldScale(new V()); holder.scale.set(1 / s.x, 1 / s.y, 1 / s.z);
+  holder.name = "prop:" + spec.prop; holder.add(obj); hand.add(holder); a.prop = holder;
+}
+const propSrc = {};   // id -> loaded piece, filled before playback so beats can attach synchronously
 
 // ---------- face: lip-sync from cues, blinks, smile, brows
 const VIS = ["A", "B", "C", "D", "E", "F", "G", "H"];
@@ -287,12 +375,26 @@ function runBeats() {
     if (b.look) a.look = b.look;
     if (b.walkTo) { a.target = new V(b.walkTo[0], 0, b.walkTo[1]); a.base = b.run ? "run" : "walk"; play(a, a.base); }
     if (b.move) { a.target = null; a.base = LOOPS.has(b.move) ? b.move : "idle"; play(a, b.move); }
+    const ps = propSpec(b); if (ps !== undefined) holdProp(a, ps, ps && ps !== "none" ? propSrc[ps.prop] : null);
     if (b.say && lines[b.say]) { a.speaking = { l: lines[b.say], t0: simT }; a.brows = 1; }
+  }
+}
+function caption() {   // live only: the words being said (rendered videos get burned-in captions instead)
+  const l = Object.values(actors).find(a => a.speaking)?.speaking.l;
+  if (capEl.textContent !== (l?.text || "")) capEl.textContent = l?.text || "";
+  capEl.hidden = !l?.text;
+}
+function restart() {   // live loop: everyone back to their marks
+  simT = 0; S.beats.forEach(b => (b.done = false)); shot = { type: "wide" }; shotFrom = null;
+  for (const a of Object.values(actors)) {
+    a.group.position.set(a.spec.at?.[0] || 0, 0, a.spec.at?.[1] || 0); a.group.rotation.y = (a.spec.face || 0) * Math.PI / 180;
+    a.target = null; a.speaking = null; a.look = "camera"; a.base = "idle"; play(a, "idle", 0.2); holdProp(a, null);
   }
 }
 function frame(dt) {
   runBeats();
   for (const a of Object.values(actors)) { a.mixer.update(dt); a.root.updateMatrixWorld(true); body(a, dt, simT); face(a, dt, simT); }
+  if (live) caption();
   if (ctl && !SCENE && window.__free) ctl.update(); else camera(simT);
   grade.uniforms.t.value = simT; composer.render(dt);
   simT += dt;
@@ -301,17 +403,19 @@ function frame(dt) {
 try {
   const [bot, cmu] = await Promise.all([loadGltfJson("clips/mixamo-clips.json"), getJSON("clips/cmu-clips.json")]);
   const credit = await buildSet();
+  for (const b of S.beats || []) { const ps = propSpec(b); if (ps && ps !== "none" && ps.prop && !propSrc[ps.prop]) propSrc[ps.prop] = await loadProp(ps.prop); }
   for (const spec of S.cast) {
     const m = await loadModel(spec.model || "teen", bot, cmu);
     for (const b of S.beats || []) if (b.move && (b.actor === spec.id || (!b.actor && spec === S.cast[0]))) await extraClip(m, b.move);
     makeActor(spec, m);
   }
-  status.textContent = live ? "Builder Studio demo" + (credit ? " · " + credit : "") : "";
+  status.textContent = live ? (PREVIEW ? "Preview" : "Builder Studio demo") + (credit ? " · " + credit : "") : "";
   window.__ready = true;
 } catch (e) { console.error(e); status.textContent = "Could not load: " + e.message; window.__ready = "error"; }
 
 window.__prepare = async () => Object.keys(actors);
+window.__actors = actors; window.__grip = GRIP; window.__cam = cam;   // for tuning grips from the console
 window.__step = async dt => frame(dt);
 window.__events = () => events;
-if (live && window.__ready === true) { const clock = new THREE.Clock(); r.setAnimationLoop(() => { const dt = Math.min(clock.getDelta(), 0.05); if (simT > S.duration) { simT = 0; S.beats.forEach(b => (b.done = false)); } frame(dt); }); }
+if (live && window.__ready === true) { const clock = new THREE.Clock(); r.setAnimationLoop(() => { const dt = Math.min(clock.getDelta(), 0.05); if (simT > S.duration) restart(); frame(dt); }); }
 </script></body></html>

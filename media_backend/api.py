@@ -666,6 +666,14 @@ def create_app() -> FastAPI:
 
         return {"stages": list_stages()}
 
+    @app.get("/studio/stages")
+    def studio_stages(_: User = Depends(current_user)):
+        """Stages with their sets, character models and moves, plus the voices, for the Studio editor."""
+        from .scene import list_stages
+        from .voices import VOICES
+
+        return {"stages": [i for i in (talk.stage_info(n) for n in list_stages()) if i], "voices": VOICES}
+
     @app.get("/stages/{name}/{path:path}", include_in_schema=False)
     def stage_file(name: str, path: str = "", _: User = Depends(current_user)):
         """A stage's files (its talking viewer and assets), read-only, for signed-in people."""

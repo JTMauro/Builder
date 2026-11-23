@@ -1,0 +1,107 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Character export</title>
+<style>html,body{margin:0;background:#dfe2e4}canvas{display:block}</style></head><body>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+// Used by export_glb.cjs (Builder's export_character): bake a stage character's moves into a binary glTF,
+// then load the file back and render one frame of a move as a check. Stage files are served at /, this page at /__view/.
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+import { retarget, gestures, CMU } from "./anim.js";
+
+const loader = new GLTFLoader();
+// plain <img> textures: GLTFExporter redraws them on a canvas
+loader.register(p => { p.textureLoader = new THREE.TextureLoader(p.options.manager); return { name: "img_textures" }; });
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const getJSON = async u => { const res = await fetch(u); if (!res.ok) throw new Error(u + " returned " + res.status); return res.json(); };
+const parseGLB = bytes => new Promise((ok, bad) => loader.parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), "", ok, bad));
+async function loadGltfJson(url) {   // one-file glTF (.json from glb2json.py) -> GLB in memory
+  const json = await getJSON(url); const uri = json.buffers[0].uri; delete json.buffers[0].uri;
+  const bin = b64(uri.slice(uri.indexOf(",") + 1)); json.buffers[0].byteLength = bin.length;
+  const js = new TextEncoder().encode(JSON.stringify(json)), jl = (js.length + 3) & ~3, bl = (bin.length + 3) & ~3;
+  const out = new Uint8Array(28 + jl + bl), dv = new DataView(out.buffer);
+  dv.setUint32(0, 0x46546C67, true); dv.setUint32(4, 2, true); dv.setUint32(8, out.length, true);
+  dv.setUint32(12, jl, true); dv.setUint32(16, 0x4E4F534A, true); out.fill(0x20, 20, 20 + jl); out.set(js, 20);
+  dv.setUint32(20 + jl, bl, true); dv.setUint32(24 + jl, 0x004E4942, true); out.set(bin, 28 + jl);
+  return parseGLB(out);
+}
+const BASE = ["idle", "walk", "run", "agree", "headShake"], GESTURES = ["point", "thumbs up", "wave", "arms crossed"];
+const CMU_OPTS = { rename: CMU, neck: -0.08, head: -0.14 };
+const info = clips => clips.map(c => ({ name: c.name, duration: +c.duration.toFixed(3), tracks: c.tracks.length }));
+
+window.__export = async job => {
+  const want = new Set(job.moves), inPlace = job.inPlace !== false;
+  const g = await loadGltfJson(`/models/${job.model}.json`), root = g.scene;
+  root.traverse(o => {   // the same alpha fixes the stage applies, so brows, lashes and hair export as alpha-masked
+    if (!o.isMesh) return; const m = o.material, n = m?.name || "";
+    if (/brow|lash|hair/i.test(n)) { m.alphaTest = 0.2; m.transparent = false; if (/hair/i.test(n)) m.side = THREE.FrontSide; }
+    if (!job.morphs && o.geometry.morphAttributes) {
+      o.geometry.morphAttributes = {}; o.geometry.morphTargetsRelative = false; o.morphTargetInfluences = undefined; o.morphTargetDictionary = undefined;
+    }
+  });
+  const rest = []; root.traverse(o => { if (o.isBone) rest.push([o, o.position.clone(), o.quaternion.clone(), o.scale.clone()]); });
+  const bot = await loadGltfJson("/clips/mixamo-clips.json");
+  const clips = retarget(bot.scene, bot.animations.filter(c => BASE.includes(c.name) && (want.has(c.name) || c.name === "idle")), root, { inPlace });
+  const pack = await getJSON("/clips/cmu-clips.json").catch(() => ({ glb: {} }));
+  const index = await getJSON("/clips/cmu/index.json").catch(() => ({}));
+  for (const label of job.moves) {
+    if (BASE.includes(label) || GESTURES.includes(label)) continue;
+    let data = pack.glb?.[label];
+    if (!data && index[label]) data = (await getJSON("/clips/cmu/" + index[label])).glb;
+    if (!data) throw new Error("no motion for move " + label);
+    const cg = await parseGLB(b64(data)), c = cg.animations[0]; c.name = label;
+    clips.push(...retarget(cg.scene, [c], root, { ...CMU_OPTS, inPlace }));
+  }
+  if (job.moves.some(m => GESTURES.includes(m))) {   // gestures are layered over the idle's first frame
+    const idle = clips.find(c => c.name === "idle"), mixer = new THREE.AnimationMixer(root);
+    mixer.clipAction(idle).play(); mixer.setTime(0); root.updateMatrixWorld(true);
+    const pose0 = new Map(); root.traverse(o => { if (o.isBone) pose0.set(o, o.quaternion.clone()); });
+    mixer.stopAllAction(); mixer.uncacheRoot(root);
+    clips.push(...gestures(root, pose0, idle).filter(c => want.has(c.name)));
+  }
+  for (const [b, p, q, s] of rest) { b.position.copy(p); b.quaternion.copy(q); b.scale.copy(s); }   // export in the rest pose
+  root.updateMatrixWorld(true);
+  // every clip keys every bone (motion capture leaves fingers out), so switching moves in a game never leaves a bone stuck
+  for (const c of clips) {
+    const has = new Set(c.tracks.map(t => t.name));
+    for (const [b, , q] of rest) if (!has.has(b.name + ".quaternion")) c.tracks.push(new THREE.QuaternionKeyframeTrack(b.name + ".quaternion", [0, c.duration], [...q.toArray(), ...q.toArray()]));
+  }
+  const order =new Map(job.moves.map((m, i) => [m, i])), out = clips.filter(c => order.has(c.name)).sort((a, b) => order.get(a.name) - order.get(b.name));
+  root.name = job.model;
+  const glb = await new GLTFExporter().parseAsync(root, { binary: true, animations: out, onlyVisible: true });
+  const res = await fetch("/__out", { method: "POST", body: glb });
+  if (!res.ok) throw new Error("could not save the GLB: " + res.status);
+  return { clips: info(out), bytes: glb.byteLength };
+};
+
+window.__check = async job => {   // load the exported GLB like a game would, play a move, render one frame
+  const g = await loader.loadAsync("/__file");
+  let morphTargets = 0, meshes = 0, bones = 0, triangles = 0;
+  g.scene.traverse(o => {
+    if (o.isBone) bones++;
+    if (o.isMesh) { meshes++; triangles += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
+      morphTargets = Math.max(morphTargets, Object.keys(o.morphTargetDictionary || {}).length); }
+  });
+  const loaded = { clips: info(g.animations), morphTargets, meshes, bones, triangles: Math.round(triangles) };
+  if (!job.clip) return { loaded };
+  const W = job.width || 640, H = job.height || 640;
+  const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); r.setSize(W, H); document.body.appendChild(r.domElement);
+  r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.ACESFilmicToneMapping;
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0xdfe2e4);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f94, 2.2));
+  const key = new THREE.DirectionalLight(0xfff1e0, 2.4); key.position.set(2, 4, 3); scene.add(key);
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(6, 48), new THREE.MeshStandardMaterial({ color: 0xc8ccd0, roughness: 0.95 }));
+  floor.rotation.x = -Math.PI / 2; scene.add(floor); scene.add(g.scene);
+  const clip = THREE.AnimationClip.findByName(g.animations, job.clip); if (!clip) throw new Error("the GLB has no clip " + job.clip);
+  const mixer = new THREE.AnimationMixer(g.scene); mixer.clipAction(clip).play();
+  mixer.setTime(job.t ?? Math.min(clip.duration * 0.45, 1.4)); g.scene.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  g.scene.traverse(o => { if (o.isSkinnedMesh) { o.computeBoundingBox(); box.union(o.boundingBox.clone().applyMatrix4(o.matrixWorld)); } });
+  const c = box.getCenter(new THREE.Vector3()), h = box.max.y - box.min.y;
+  const cam = new THREE.PerspectiveCamera(30, W / H, 0.01, 100), dist = h * 0.62 / Math.tan(15 * Math.PI / 180);
+  cam.position.set(c.x + dist * 0.42, c.y + h * 0.08, c.z + dist * 0.9); cam.lookAt(c);
+  r.render(scene, cam);
+  return { loaded, height: +h.toFixed(3), png: r.domElement.toDataURL("image/png"), clip: job.clip, t: mixer.time };
+};
+window.__ready = true;
+</script></body></html>

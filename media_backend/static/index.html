@@ -124,6 +124,7 @@
       <button type="button" role="tab" class="tab" id="tab-craft" data-view="craft" aria-selected="true">🏗️ Craft</button>
       <button type="button" role="tab" class="tab" id="tab-media" data-view="media" aria-selected="false">🎬 Audio &amp; video</button>
       <button type="button" role="tab" class="tab" id="tab-talk" data-view="talk" aria-selected="false">💬 Talk</button>
+      <button type="button" role="tab" class="tab" id="tab-studio" data-view="studio" aria-selected="false">🎬 Studio</button>
     </nav>
 
     <main class="layout">
@@ -249,6 +250,84 @@
         <div id="talk-log" class="talk-log" aria-live="polite"></div>
       </section>
 
+      <!-- Studio: make a scene without code (cast, beats, camera), preview it live, render it with scene_video -->
+      <section class="panel studio view-studio" aria-labelledby="studio-h" hidden>
+        <div class="panel-head">
+          <h2 id="studio-h">Studio</h2>
+          <div class="head-actions">
+            <label class="sr-only" for="st-stage">Stage</label><select id="st-stage" class="talk-select"></select>
+            <label class="sr-only" for="st-set">Place</label><select id="st-set" class="talk-select"></select>
+          </div>
+        </div>
+        <div id="st-empty" class="build-empty" hidden><p><strong>No stage with a studio page yet.</strong> Build one with
+          <code>tools/makehuman/make_stage.py</code>, then add places with <code>add_set.py</code>.</p></div>
+        <div id="st-body">
+          <div class="talk-stage-box studio-box">
+            <iframe id="st-frame" title="Scene preview" hidden></iframe>
+            <video id="st-video" controls playsinline hidden></video>
+            <div id="st-placeholder" class="talk-empty build-empty"><p>Set up your cast and beats, then <strong>Preview</strong> to watch it live
+              (no voices yet, captions instead) or <strong>Render</strong> to make the finished video.</p></div>
+          </div>
+          <div class="studio-actions">
+            <button type="button" class="btn" id="st-preview">▶ Preview</button>
+            <button type="button" class="btn primary" id="st-render">🎬 Render</button>
+            <a id="st-download" class="btn ghost small" hidden download>⬇ Download</a>
+            <span id="st-status" class="muted small-text" aria-live="polite"></span>
+          </div>
+
+          <details class="studio-sec" open>
+            <summary class="section-label">Cast</summary>
+            <div class="cast-wrap">
+              <svg id="st-floor" class="floor" viewBox="-4.4 -4.4 8.8 8.8" role="img" aria-label="Floor plan: drag the characters to place them; the camera is at the bottom"></svg>
+              <div><div id="st-cast" class="rows"></div>
+                <button type="button" class="btn ghost small" id="st-add-cast">+ Add character</button></div>
+            </div>
+          </details>
+
+          <details class="studio-sec" open>
+            <summary class="section-label">Beats</summary>
+            <div id="st-beats" class="beats"></div>
+            <button type="button" class="btn ghost small" id="st-add-beat">+ Add beat</button>
+          </details>
+
+          <details class="studio-sec">
+            <summary class="section-label">Options</summary>
+            <div class="fields">
+              <label class="field"><span>Size</span><select id="st-res"><option>640x360</option><option selected>1280x720</option><option>1920x1080</option><option>2560x1440</option><option>3840x2160</option></select></label>
+              <label class="field"><span>Frames a second</span><input id="st-fps" type="number" min="12" max="60" value="30"></label>
+              <label class="field"><span>Music</span><select id="st-music"><option>none</option><option>calm</option><option>upbeat</option><option>tense</option><option>sad</option><option>epic</option><option>playful</option><option>lofi</option></select></label>
+              <label class="field"><span>Look</span><select id="st-look"><option>film</option><option>warm</option><option>cool</option><option>noir</option><option>vintage</option><option>bleach</option><option>none</option></select></label>
+              <label class="field"><span>Quality</span><select id="st-quality"><option value="film">Film (slower)</option><option value="fast">Fast</option></select></label>
+              <label class="field check"><input id="st-captions" type="checkbox" checked><span>Captions</span></label>
+            </div>
+          </details>
+
+          <details class="studio-sec">
+            <summary class="section-label">Templates</summary>
+            <div class="inline-form">
+              <input id="st-tpl-name" maxlength="60" placeholder="Name this scene, e.g. Park hello">
+              <button type="button" class="btn primary small" id="st-tpl-save">Save</button>
+            </div>
+            <div class="inline-form">
+              <select id="st-tpl-list" aria-label="Saved scenes"></select>
+              <button type="button" class="btn small" id="st-tpl-load">Load</button>
+              <button type="button" class="btn ghost small" id="st-tpl-del">Delete</button>
+            </div>
+            <p class="muted small-text">Saved in this browser.</p>
+          </details>
+
+          <details class="studio-sec">
+            <summary class="section-label">Ask the director</summary>
+            <p class="muted small-text">Say what should happen; Claude plans the shots, Builder renders it and Claude checks the result. Takes a while.</p>
+            <div class="inline-form">
+              <textarea id="st-direct" rows="2" maxlength="2000" placeholder="e.g. Two friends meet in the park; one shows off a dance, the other laughs"></textarea>
+              <button type="button" class="btn primary small" id="st-direct-go">Direct it</button>
+            </div>
+            <div id="st-direct-out" class="small-text"></div>
+          </details>
+        </div>
+      </section>
+
       <!-- Assistant -->
       <section class="panel chat" aria-labelledby="chat-h">
         <div class="panel-head">
@@ -360,5 +439,6 @@
   </dialog>
 
   <script src="/static/app.js"></script>
+  <script src="/static/studio.js"></script>
 </body>
 </html>

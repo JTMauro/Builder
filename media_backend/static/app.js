@@ -502,13 +502,13 @@ mascot.addEventListener("click", () => {
 /* ================================================================ craft builds */
 const craftState = { runs: [], projects: [], current: null, cursor: 0, polling: null, engine: null };
 
+const VIEWS = ["craft", "media", "talk", "studio"];
 function showView(view) {
   document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.view === view)));
-  document.querySelectorAll(".view-craft").forEach((el) => { el.hidden = view !== "craft"; });
-  document.querySelectorAll(".view-media").forEach((el) => { el.hidden = view !== "media"; });
-  document.querySelectorAll(".view-talk").forEach((el) => { el.hidden = view !== "talk"; });
+  for (const v of VIEWS) document.querySelectorAll(`.view-${v}`).forEach((el) => { el.hidden = view !== v; });
   store.set("mb_view", view);
   if (view === "talk") loadTalk();
+  if (view === "studio") window.loadStudio?.();   // static/studio.js
 }
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showView(t.dataset.view)));
 
@@ -990,7 +990,7 @@ async function boot() {
     await loadFiles();
     loadChatList();
     loadCraft();
-    showView(["media", "talk"].includes(store.get("mb_view")) ? store.get("mb_view") : "craft");
+    showView(VIEWS.includes(store.get("mb_view")) ? store.get("mb_view") : "craft");
     pill.textContent = "Workshop open"; pill.className = "pill ok";
     if (!log.children.length) greet();
   } catch (e) {
