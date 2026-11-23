@@ -41,3 +41,22 @@ def test_dub_video_and_short(stub_speech, media, monkeypatch):
     short = ops.run_operation("make_short", {"file_id": media["video"], "captions": True})
     v = ops.media_info(short.outputs[0].id)["video"]
     assert v["height"] == 1920 and v["width"] == 1080
+
+
+def test_dub_video_keeps_music(stub_speech, media, monkeypatch):
+    pytest.importorskip("numpy")
+    from media_backend import extras
+
+    monkeypatch.setattr(director, "_ask", fake_ask)
+    seen = {}
+
+    def fake_split(src, stems, work):
+        seen["called"] = stems
+        out = work / "no_vocals.wav"
+        import subprocess
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=f=220:d=3", str(out)], check=True)
+        return {"no_vocals": out, "vocals": out}
+
+    monkeypatch.setattr(extras, "demucs_split", fake_split)
+    res = ops.run_operation("dub_video", {"file_id": media["video"], "language": "es", "keep_music": True})
+    assert seen["called"] == "vocals" and res.data["kept_music"] and ops.media_info(res.outputs[0].id)["has_video"]

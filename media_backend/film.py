@@ -190,6 +190,7 @@ class DubVideoParams(BaseModel):
     language: Literal["es", "fr", "it", "pt", "hi", "en"]
     voice: str | None = Field(None, description="Voice to use (default: a voice for that language)")
     original_level: float = Field(0.18, ge=0, le=1, description="How loud the original sound stays underneath")
+    keep_music: bool = Field(False, description="Split off the original voices first (Demucs) and keep the music and effects at full level under the new voice. Slow on CPU (about 30x the length).")
 
 
 @operation("dub_video", DubVideoParams, "Dub any video into another language: transcribe the speech, translate it with Claude, speak each sentence at its original time with a local voice, over the lowered original sound. (Lips aren't changed; for 3D scenes use dub_scene.)")
@@ -212,20 +213,34 @@ def dub_video(p: DubVideoParams) -> OpResult:
         tempo = min(1.35, max(1.0, dur / slot))   # squeeze a long sentence a little to fit its slot
         tracks.append((storage.path_of(sp), float(seg["start"]), tempo))
     src = storage.path_of(p.file_id)
-    args = ["-i", str(src)]
+    bed, level = src, p.original_level
+    if p.keep_music:
+        from .extras import demucs_split
+
+        stems_dir = Path(tempfile.mkdtemp(prefix="dubstems-"))
+        parts = demucs_split(src, "vocals", stems_dir)
+        bed, level = parts["no_vocals"], 1.0
+    args = ["-i", str(bed)] if p.keep_music else ["-i", str(src)]
     for t, _, _ in tracks:
         args += ["-i", str(t)]
-    fc = [f"[0:a]volume={p.original_level}[orig]"]
+    fc = [f"[0:a]volume={level}[orig]"]
     for n, (_, start, tempo) in enumerate(tracks, start=1):
         ms = int(start * 1000)
         fc.append(f"[{n}:a]atempo={tempo:.3f},adelay={ms}|{ms}[d{n}]")
     fc.append("[orig]" + "".join(f"[d{n}]" for n in range(1, len(tracks) + 1)) +
               f"amix=inputs={len(tracks) + 1}:normalize=0:duration=first,loudnorm=I=-16:TP=-2:LRA=11[aout]")
-    vmap = ["-map", "0:v", "-c:v", "copy"] if info["has_video"] else []
+    vin = len(tracks) + 1
+    if info["has_video"]:
+        args += ["-i", str(src)]
+    vmap = ["-map", f"{vin}:v", "-c:v", "copy"] if info["has_video"] else []
     ext = "mp4" if info["has_video"] else "m4a"
-    return _guarded("dub_video", [p.file_id, *made], f"{Path(src).stem}_{p.language}.{ext}",
-                    lambda out: _ffmpeg(*args, "-filter_complex", ";".join(fc), *vmap, "-map", "[aout]", *AUDIO_ENC, str(out)),
-                    data={"language": p.language, "sentences": len(tracks), "lines": texts})
+    try:
+        return _guarded("dub_video", [p.file_id, *made], f"{Path(src).stem}_{p.language}.{ext}",
+                        lambda out: _ffmpeg(*args, "-filter_complex", ";".join(fc), *vmap, "-map", "[aout]", *AUDIO_ENC, str(out)),
+                        data={"language": p.language, "sentences": len(tracks), "lines": texts, "kept_music": p.keep_music})
+    finally:
+        if p.keep_music:
+            shutil.rmtree(stems_dir, ignore_errors=True)
 
 
 class ShortParams(BaseModel):
