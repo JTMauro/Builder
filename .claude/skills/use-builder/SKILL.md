@@ -113,6 +113,20 @@ stored per person; the caller keeps `history`. A stage's files are served read-o
 `~/.builder/stages/<name>/index.html` in step with `tools/makehuman/view/talk.html`. `TALK_STUB_REPLY` (JSON
 `{say, gesture}`) replaces Claude for demos and tests.
 
+### The Studio tab (scenes without code)
+
+The web app's **Studio** tab edits `scene_video` params (stage, set, cast with voices and floor positions,
+beats with say/move/look/shot/walk_to/prop/hold, options), previews them live and renders them as a job;
+**Ask the director** runs `direct_scene`. `GET /studio/stages` gives stages with `sets`, `models` (minus
+`light`), `moves` and `studio` (has studio.html), plus `voices`. Live preview without rendering:
+`/stages/<name>/studio.html?preview` waits for `postMessage({type: "builder-scene", scene: <scene_video
+params>}, origin)` (it posts `{type: "studio-waiting"}` to its parent first), or `studio.html?scene=<same-origin
+JSON url>`; it times the beats like scene_video, shows lines as captions with a letter-driven mouth, and loops.
+Beat `prop: {prop, hand: "right"|"left"}` or `"none"` puts a prop from the stage's `props/index.json` in a hand
+(`hold` stays the seconds for a move); grips per prop are in the `GRIP` table in studio.html (right hand; the left
+mirrors it through the rest pose). Keep `~/.builder/stages/<name>/studio.html` in step with
+`tools/makehuman/view/studio.html`. Studio templates live in browser storage until the shared scene library exists.
+
 ## Picture to 3D model
 
 `image_to_3d` (TripoSR, MIT, free and local) turns a photo of one object into a .glb (or .obj) with vertex

@@ -245,6 +245,7 @@ Open `http://127.0.0.1:8000/` for the **Builder** web app. API docs are at `http
 - **Jobs:** live status. Results open in the preview, and the mascot hammers away while anything is running.
 - **Chat:** talk to the assistant, which can see the selected file. Click the mascot to jump to the chat.
 - **Talk:** talk to a 3D character live (see [Talk to a character](#talk-to-a-character)).
+- **Studio:** make a scene without code (see [Make a scene in the Studio](#make-a-scene-in-the-studio)).
 - Light and dark themes, responsive down to phone width.
 
 ### Talk to a character
@@ -263,6 +264,25 @@ few turns along and nothing is saved on the server (the recording is deleted onc
 Claude key, set `TALK_STUB_REPLY='{"say": "Hi!", "gesture": "wave"}'` to try the voice and lip-sync with a
 fixed answer. The stage page works alone too: `index.html?embed=1` shows just the stage, and other apps can
 drive it with `window.__speakLine({text, duration, cues, words}, audioArrayBuffer)` and `window.__play("wave")`.
+
+### Make a scene in the Studio
+
+The **🎬 Studio** tab builds a `scene_video` for you:
+
+- **Stage and place:** a stage with a `studio.html`, and one of its sets (park, living room, street, beach, gym,
+  school, cafe, stadium, snow…) or the grey studio.
+- **Cast:** up to six characters from the stage's models, each with a Kokoro voice. Drag them on the floor plan
+  (the camera is at the bottom; arrow keys nudge the selected one) or type x/z in metres and a facing in degrees.
+- **Beats:** one row per moment: who, what they say, a move or gesture, where they look (camera or another
+  character), a camera shot (wide, two, medium, close, over-the-shoulder, with an optional glide), a spot to
+  walk or run to, a prop to hold (from the stage's `props/`) and how long to hold a move. Reorder, copy or remove rows.
+- **Preview** plays the scene live in the stage's `studio.html?preview`, with captions and an approximate mouth
+  in place of voices. **Render** runs `scene_video` as a background job and shows the video with a download link
+  (it's in the library too). **Ask the director** hands a plain-words request to `direct_scene` (needs a Claude
+  key) and can load its plan into the editor.
+- **Templates** are saved in this browser for now, and your draft is kept between visits.
+
+`GET /studio/stages` lists the stages with their sets, models and moves, plus the voices.
 
 ### Accounts and sign-in
 
@@ -330,6 +350,7 @@ assets/theme.mp3 as the soundtrack, add the title 'Episode 1', and export it to 
 | `GET /assistant/sessions`, `GET/DELETE /assistant/sessions/{id}` | Your saved chats |
 | `POST /talk` (multipart: `audio` or `text`, `character`, `voice`, `history`, `persona`) | Talk to a character: `{heard, say, gesture, audio_url, duration, cues, words}` |
 | `GET /stages`, `GET /stages/{name}/{path}` | Stages and their files (read-only) |
+| `GET /studio/stages` | Stages with their sets, models and moves, and the voices (for the Studio) |
 | `GET /auth/status`, `POST /auth/setup` / `login` / `signup` / `logout` / `password` | Accounts |
 | `GET/POST /auth/tokens`, `DELETE /auth/tokens/{id}` | Personal access tokens |
 | `GET/POST /auth/users`, `DELETE /auth/users/{id}` | Manage people (admins) |
