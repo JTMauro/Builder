@@ -237,7 +237,25 @@ Open `http://127.0.0.1:8000/` for the **Builder** web app. API docs are at `http
   operation's schema, so new operations appear automatically.
 - **Jobs:** live status. Results open in the preview, and the mascot hammers away while anything is running.
 - **Chat:** talk to the assistant, which can see the selected file. Click the mascot to jump to the chat.
+- **Talk:** talk to a 3D character live (see [Talk to a character](#talk-to-a-character)).
 - Light and dark themes, responsive down to phone width.
+
+### Talk to a character
+
+The **💬 Talk** tab puts a stage's character (e.g. the teen) on screen. Hold **🎤 Hold to talk** (or the space
+bar) while you speak, or type, and the character answers out loud with a moving mouth and a gesture:
+
+1. Whisper (local) hears your recording;
+2. Claude answers in character (two short sentences and a gesture), with the same key and model as Rivet;
+3. Kokoro (local) speaks it in the voice you picked (default `am_puck`) and `lipsync` works out the mouth shapes;
+4. the stage page plays the voice from the character's head with matching lip-sync.
+
+Stages live in `~/.builder/stages/<name>` (or `BUILDER_STAGES_DIR`); build one with
+`tools/makehuman/make_stage.py`. The conversation lives only in your browser tab: each turn sends the last
+few turns along and nothing is saved on the server (the recording is deleted once it's heard). Without a
+Claude key, set `TALK_STUB_REPLY='{"say": "Hi!", "gesture": "wave"}'` to try the voice and lip-sync with a
+fixed answer. The stage page works alone too: `index.html?embed=1` shows just the stage, and other apps can
+drive it with `window.__speakLine({text, duration, cues, words}, audioArrayBuffer)` and `window.__play("wave")`.
 
 ### Accounts and sign-in
 
@@ -303,6 +321,8 @@ assets/theme.mp3 as the soundtrack, add the title 'Episode 1', and export it to 
 | `GET /jobs/{id}[?wait=30]` | Job status, outputs, error |
 | `POST /assistant/chat` `{message, session_id?, file_ids?}` | Talk to the assistant (as the signed-in person) |
 | `GET /assistant/sessions`, `GET/DELETE /assistant/sessions/{id}` | Your saved chats |
+| `POST /talk` (multipart: `audio` or `text`, `character`, `voice`, `history`, `persona`) | Talk to a character: `{heard, say, gesture, audio_url, duration, cues, words}` |
+| `GET /stages`, `GET /stages/{name}/{path}` | Stages and their files (read-only) |
 | `GET /auth/status`, `POST /auth/setup` / `login` / `signup` / `logout` / `password` | Accounts |
 | `GET/POST /auth/tokens`, `DELETE /auth/tokens/{id}` | Personal access tokens |
 | `GET/POST /auth/users`, `DELETE /auth/users/{id}` | Manage people (admins) |

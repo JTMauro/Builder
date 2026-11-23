@@ -88,6 +88,18 @@ Cycles stills; `video_to_motion` captures body and face from a video; `style_che
 catch unwanted changes against approved pictures. Rendering is slow on CPU (720p about 2–4 s a frame);
 start long jobs with `wait=false`.
 
+### Talk to a character live
+
+The web app's **Talk** tab (or `POST /talk`, multipart: `audio` as webm/ogg/wav or `text`, plus `character`
+= stage name, `voice` = Kokoro voice, `history` = JSON `[{role, text}]` of the last turns, optional `persona`)
+returns `{heard, say, gesture, audio_url, duration, cues: [[t, shape]], words: [{w, s, e}]}`: Whisper hears,
+Claude answers in character with Rivet's key and model, Kokoro speaks, `lipsync` gives mouth shapes. Nothing is
+stored per person; the caller keeps `history`. A stage's files are served read-only at
+`/stages/{name}/{path}`; its `index.html?embed=1` is the bare stage, driven by
+`window.__speakLine(line, audioArrayBuffer)` and `window.__play(gesture)`. Keep the stage copy in
+`~/.builder/stages/<name>/index.html` in step with `tools/makehuman/view/talk.html`. `TALK_STUB_REPLY` (JSON
+`{say, gesture}`) replaces Claude for demos and tests.
+
 ## Free assets for a build
 
 `asset_search` (HDRI skies, textures, models, CC images and sounds; licence and credit in every result),
