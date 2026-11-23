@@ -151,7 +151,7 @@ async function loadGltfJson(url) {
 }
 
 const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), tmpQ2 = new THREE.Quaternion(), headFwd = new THREE.Vector3(0, 0, 1);
-let boy, root, mixer, acts = {}, current = null, base = "idle", lines = {}, bones = {}, morphMeshes = [], stool, sitLow = 0.45;
+let boy, root, mixer, acts = {}, current = null, base = "idle", lines = {}, bones = {}, morphMeshes = [], stool, stoolOn = false, sitLow = 0.45, sitAt = new THREE.Vector3();
 const LOOPS = new Set(["idle", "walk", "run"]);
 try {
   const [g, bot, cmu, light, talk] = await Promise.all([loadGltfJson("models/teen.json"), loadGltfJson("clips/mixamo-clips.json"),
@@ -196,7 +196,7 @@ try {
     acts[c.name] = a;
   }
   // how low the hips go when he sits, for the stool
-  { const a = acts.sit; a.play(); let lo = 9; for (let t = 0; t < a.getClip().duration; t += 0.1) { mixer.setTime(t); root.updateMatrixWorld(true); lo = Math.min(lo, bones.Hips.getWorldPosition(tmpV).y); } a.stop(); sitLow = lo; }
+  { const a = acts.sit; a.play(); let lo = 9; for (let t = 0; t < a.getClip().duration; t += 0.1) { mixer.setTime(t); root.updateMatrixWorld(true); const hp = bones.Hips.getWorldPosition(tmpV); if (hp.y < lo) { lo = hp.y; sitAt.set(hp.x, 0, hp.z - 0.06); } } a.stop(); sitLow = lo; }
   mixer.addEventListener("finished", e => { if (e.action === current && !LOOPS.has(current._name)) play(base); });
   stool = makeStool(sitLow - 0.1); stool.visible = false; scene.add(stool);
   for (const l of talk.lines) lines[l.key] = l;
@@ -225,7 +225,7 @@ function play(name, fade = 0.3) {
 document.querySelectorAll(".bar").forEach(bar => bar.addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b || !mixer) return;
   const n = b.dataset.a; target = null; base = LOOPS.has(n) ? n : "idle"; play(n);
-  if (n === "sit") { stool.position.set(boy.position.x, 0, boy.position.z); stool.visible = true; }
+  if (n === "sit") { stool.position.copy(sitAt).applyQuaternion(boy.quaternion).add(boy.position); stool.position.y = 0; stoolOn = true; }
 }));
 
 // ---------- sound: positional voice from his head, footsteps from his feet
@@ -269,7 +269,7 @@ document.getElementById("view").addEventListener("click", e => {
 
 // ---------- face: lip-sync, blinks, a slight smile, brows
 const VIS = ["A", "B", "C", "D", "E", "F", "G", "H"], face = {}, faceT = {};
-function setMorph(name, v) { for (const m of morphMeshes) { if (window.__noHair && /hair/i.test(m.material.name)) continue; const i = m.morphTargetDictionary[name]; if (i !== undefined) m.morphTargetInfluences[i] = v; } }
+function setMorph(name, v) { for (const m of morphMeshes) { const i = m.morphTargetDictionary[name]; if (i !== undefined) m.morphTargetInfluences[i] = v; } }
 let nextBlink = 1.5, blinkT = -1, browsKick = 0, closeUp = false;
 function updateFace(dt, t) {
   for (const v of VIS) faceT["viseme_" + v] = 0;
@@ -303,7 +303,7 @@ function bodyLife(dt, t) {
   root.updateMatrixWorld(true);
   // look at the camera, within what a neck can do
   const want = current && LOOK_OK.has(current._name) && !(base === "run") ? 1 : 0; lookW += (want - lookW) * Math.min(1, dt * 3);
-  if (lookW < 0.01 || window.__noLook) return;
+  if (lookW < 0.01) return;
   const head = bones.Head, hp = head.getWorldPosition(tmpV);
   const dirB = cam.position.clone().sub(hp).applyQuaternion(boy.quaternion.clone().invert()).normalize();
   let yaw = Math.atan2(dirB.x, dirB.z), pitch = Math.asin(THREE.MathUtils.clamp(dirB.y, -1, 1));
@@ -343,7 +343,7 @@ r.domElement.addEventListener("pointerup", e => {
   const rect = r.domElement.getBoundingClientRect(); ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   ray.setFromCamera(ndc, cam); const hit = ray.intersectObject(floor)[0]; if (!hit) return;
   const now = performance.now(), run = now - lastTap < 320; lastTap = now;
-  target = hit.point.clone(); target.y = 0; base = run ? "run" : "walk"; play(base); stool.visible = false;
+  target = hit.point.clone(); target.y = 0; base = run ? "run" : "walk"; play(base); stoolOn = false;
 });
 const keys = new Set();
 addEventListener("keydown", e => { if (/^(Arrow|Key[WASD]|Shift)/.test(e.code)) { keys.add(e.code); if (e.code.startsWith("Arrow")) e.preventDefault(); } });
@@ -357,7 +357,7 @@ function frameView() {
   const d = closeUp ? 0.85 : 4.6;
   cam.position.copy(ctl.target).addScaledVector(fw, d * 0.94).addScaledVector(side, d * (closeUp ? 0.1 : 0.42)); cam.position.y = hy + (closeUp ? 0.03 : 0.6);
 }
-window.__frame = frameView; window.__dbg = () => ({ root, morphMeshes, listener, speaking }); window.__say = say; window.__play = play;
+window.__frame = frameView;  window.__say = say; window.__play = play;
 
 const clock = new THREE.Clock();
 r.setAnimationLoop(() => {
@@ -365,7 +365,8 @@ r.setAnimationLoop(() => {
   if (mixer) {
     mixer.update(dt); root.updateMatrixWorld(true);
     bodyLife(dt, t); updateFace(dt, t); footsteps(dt);
-    if (stool.visible && current?._name !== "sit") stool.visible = false;
+    if (stoolOn && current?._name !== "sit") stoolOn = false;
+    stool.visible = stoolOn && bones.Hips.getWorldPosition(tmpV).y < sitLow + 0.3;
   }
   if (boy) {
     const fw = (keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0) - (keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0);
