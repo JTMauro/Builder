@@ -3,7 +3,8 @@
 image_to_3d cuts the object out (rembg), runs TripoSR (MIT, Tripo AI & Stability AI) to get a 3D field,
 turns it into a mesh with marching cubes, optionally reduces the triangle count, and writes a .glb or .obj
 with vertex colours. Works best on one object on a plain background, seen from slightly above; the back is
-the model's guess. CPU works (about a minute at resolution 256 on 4 cores); a CUDA GPU is much faster.
+the model's guess. CPU works (about 1.5 minutes at resolution 256, 50 s at 128, on 4 busy cores); a CUDA GPU
+is much faster. Only the cells the surface passes through are sampled at full resolution.
 
 Needs `pip install "builder[image3d]"` (PyTorch; CPU wheels: --extra-index-url
 https://download.pytorch.org/whl/cpu). On first use it downloads into the models folder: TripoSR's code at
@@ -82,7 +83,7 @@ def ensure_model() -> tuple[Path, Path]:
         try:
             for f in ("config.yaml", "model.ckpt"):
                 hf_hub_download(WEIGHTS_REPO, f, revision=WEIGHTS_REVISION, local_dir=weights)
-        except Exception as e:  # noqa: BLE001  (network, disk)
+        except Exception as e:  # network, disk
             raise OpError(f"Couldn't download TripoSR's weights from huggingface.co/{WEIGHTS_REPO}: {e}") from e
     return code, weights
 
@@ -97,7 +98,7 @@ class ImageTo3DParams(BaseModel):
     device: Literal["auto", "cpu"] = Field("auto", description="auto uses a CUDA GPU when there is one")
 
 
-@operation("image_to_3d", ImageTo3DParams, "Turn a picture of one object into a 3D model (.glb or .obj with vertex colours), free and local with TripoSR: background removal, single-image reconstruction, marching cubes, optional decimation. Best with one object on a plain background; the hidden back is guessed. About a minute on CPU at resolution 256 (first use downloads ~1.9 GB); start with wait=false.")
+@operation("image_to_3d", ImageTo3DParams, "Turn a picture of one object into a 3D model (.glb or .obj with vertex colours), free and local with TripoSR: background removal, single-image reconstruction, marching cubes, optional decimation. Best with one object on a plain background; the hidden back is guessed. 1-2 minutes on CPU at resolution 256 (first use downloads ~1.9 GB); start with wait=false.")
 def image_to_3d(p: ImageTo3DParams) -> OpResult:
     src = _src(p.file_id)
     if src.suffix.lower() not in IMAGE_TYPES:
@@ -119,7 +120,7 @@ def image_to_3d(p: ImageTo3DParams) -> OpResult:
     stats: dict = {}
 
     def build(out: Path) -> None:
-        proc = subprocess.run([str(out) if x == "OUT" else x for x in args], capture_output=True, text=True, **NO_WINDOW)
+        proc = subprocess.run([str(out) if x == "OUT" else x for x in args], capture_output=True, text=True, check=False, **NO_WINDOW)
         last = (proc.stdout.strip().splitlines() or ["{}"])[-1]
         try:
             info = json.loads(last)

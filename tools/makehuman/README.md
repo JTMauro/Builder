@@ -169,5 +169,43 @@ Times on 4 CPU cores, 64 samples: 960x540 (`--percent 50`) full shot 45 s, close
 filling the frame is the slow part); a full shot at 1920x1080 took 6 minutes, and 3840x2160 is about 4x
 that again. Previews at `--percent 25 --samples 16` take 10-20 s.
 
-Known limits: the hair is a smooth card mesh (reads as a neat helmet up close), the tee is boxy, and the
-skin texture is low on pore detail (a fine noise bump stands in).
+### Strand hair and cloth detail (opt-in; defaults keep the plain look)
+
+```bash
+BLENDER_USER_RESOURCES=$S/bhome $S/mhenv/bin/python -I tools/makehuman/cycles.py \
+  $S/mhgen/teen.blend $S/shots/teen_3q.png --shot portrait3q --pose relaxed --strand-hair --cloth-detail
+```
+
+- `--strand-hair` grows real hair (a Cycles hair-curves object, thick curves) in place of the card mesh,
+  which is hidden (`--hair-cards keep` renders it under the strands). Roots are spread over the scalp:
+  the skin whose normal ray meets an opaque part of the hair mesh within 4.5 cm (the same area gen.py
+  paints), never the cheeks or ears. About 5 guides per cm2 walk from the scalp along a combing field
+  (away from the crown, falling with gravity on the sides, each lock turned a few degrees), staying
+  between the scalp and the hair mesh at a per-lock depth; they stop at the mesh's edge or where its
+  texture is transparent, so the haircut keeps the hair asset's shape (fringe, parting, nape). Children
+  interpolate the 3 nearest guides with clumping, a gentle wave, uneven tapered ends and a little
+  frizz; any point outside the hair mesh surface or past its edge is pulled in or cut (no spikes).
+  - `--hair-density` strands per cm2 (60: ~41k strands on short03), `--hair-length` longest strand in cm (12).
+  - Colour: Principled Hair BSDF (Chiang) with melanin from the hair texture's mean colour (light brown
+    `.40,.315,.235` -> melanin 0.39, redness 0.26), ±0.07 per lock and per-strand random variation.
+    `--hair-melanin 0.5,0.3` sets it by hand.
+- `--cloth-detail` (`--cloth-amount`, 1) takes the inflated look off the fitted clothes: each clothes mesh is
+  frozen in its pose, pulled toward the body where it stands off (to ~45 % of the gap on the sides, ~20 %
+  on top of the shoulders, where a tee rests), smoothed, kept 2 mm outside the skin, then gets soft
+  vertical folds (render subdivision + stretched cloud displacement, faded at hems and collar) and a
+  fabric bump (knit noise + fine creases over its normal map). `--cloth-sim 12` adds a 12-frame cloth
+  settle (pinned where it touches the body and below the hips, the body as collider; ~3-5 s) so the
+  sleeves hang a little; the change is small, so it is off by default.
+
+Added time on 4 CPU cores (shared with other jobs, so treat as rough): strand hair setup 6-10 s, and it
+makes the render ~40-60 % slower (closeup at `--percent 50 --samples 24`: 70 s -> 100-150 s); cloth detail
+setup under 1 s (+3-5 s with `--cloth-sim 12`) and about +10 % render time (the subdivided clothes).
+
+Strand-hair limits: the cut follows the hair asset's own mesh, so it can only be as good as that shape
+(short03's fringe sits low and the back reads as a rounded bob); it needs a `.blend`/`.glb` with a hair
+mesh (`Hair*` material) and the rig; long hair is untested. Cloth folds are procedural (not simulated
+from the pose), so there are no real armpit or waist creases.
+
+Known limits: without `--strand-hair` the hair is a smooth card mesh (reads as a neat helmet up close),
+without `--cloth-detail` the tee is boxy, and the skin texture is low on pore detail (a fine noise bump
+stands in).

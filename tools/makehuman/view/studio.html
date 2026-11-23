@@ -240,7 +240,7 @@ function play(a, name, fade = 0.3) {
 // space, metres) and turns it (degrees); the left hand mirrors it. node: which piece of a file with several variants.
 const GRIP = {
   _default: { pos: [0.0, 0.10, 0.04], rot: [0, 0, 0] },
-  football: { node: "football_inflated", pos: [0.0, 0.13, 0.07], rot: [0, 0, 0] },
+  football: { node: "football_inflated", pos: [0.0, 0.15, 0.04], rot: [0, 0, 0] },
   baseball_bat: { pos: [0.33, 0.08, 0.03], rot: [0, 0, -90] },
   classic_laptop: { pos: [0.0, 0.30, 0.02], rot: [90, 0, 0], prep: o => {   // closed, carried by its edge
     const scr = o.getObjectByName("classic_laptop_screen"); if (scr) { scr.rotation.x = Math.PI / 2; scr.position.y += 0.012; } } },
@@ -261,15 +261,25 @@ async function loadProp(id) {
   }).catch(e => { console.warn("prop " + id, e); return null; });
   return props[id];
 }
+function bindOf(a, bone) {   // a bone's rest-pose matrix in its skinned mesh's space
+  let m = null; a.root.traverse(o => { if (!m && o.isSkinnedMesh) { const i = o.skeleton.bones.indexOf(bone); if (i >= 0) m = o.skeleton.boneInverses[i].clone().invert(); } });
+  return m;
+}
 function holdProp(a, spec, src) {
   if (a.prop) { a.prop.parent?.remove(a.prop); a.prop = null; }
   if (!spec || spec === "none" || !src) return;
-  const left = spec.hand === "left", hand = a.bones[left ? "LeftHand" : "RightHand"]; if (!hand) return;
-  const g = GRIP[spec.prop] || GRIP._default, holder = new THREE.Group(), obj = src.clone();
-  obj.position.set(left ? -g.pos[0] : g.pos[0], g.pos[1], g.pos[2]);
-  obj.rotation.set(...g.rot.map((d, i) => (left && i > 0 ? -d : d) * Math.PI / 180));
-  hand.updateMatrixWorld(true); const s = hand.getWorldScale(new V()); holder.scale.set(1 / s.x, 1 / s.y, 1 / s.z);
-  holder.name = "prop:" + spec.prop; holder.add(obj); hand.add(holder); a.prop = holder;
+  const left = spec.hand === "left", R = a.bones.RightHand, hand = left ? a.bones.LeftHand : R; if (!hand) return;
+  const g = GRIP[spec.prop] || GRIP._default, holder = new THREE.Group();
+  hand.updateMatrixWorld(true); const s = hand.getWorldScale(new V());
+  // the grip in the right hand's space; the left hand gets its mirror image through the rest pose (left/right is x)
+  let m = new THREE.Matrix4().makeScale(1 / s.x, 1 / s.y, 1 / s.z)
+    .multiply(new THREE.Matrix4().compose(new V(...g.pos), new Q().setFromEuler(new THREE.Euler(...g.rot.map(d => d * Math.PI / 180))), new V(1, 1, 1)));
+  if (left) {
+    const rb = bindOf(a, R), lb = bindOf(a, hand);
+    if (rb && lb) m = lb.invert().multiply(new THREE.Matrix4().makeScale(-1, 1, 1)).multiply(rb).multiply(m);
+  }
+  holder.matrixAutoUpdate = false; holder.matrix.copy(m);
+  holder.name = "prop:" + spec.prop; holder.add(src.clone()); hand.add(holder); a.prop = holder;
 }
 const propSrc = {};   // id -> loaded piece, filled before playback so beats can attach synchronously
 

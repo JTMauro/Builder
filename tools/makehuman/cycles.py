@@ -85,9 +85,9 @@ def parse_args(argv):
     p.add_argument("--hair-melanin", help="M or M,REDNESS (0..1) for --strand-hair (default: from the hair colour)")
     p.add_argument("--hair-cards", choices=["hide", "keep"], default="hide",
                    help="with --strand-hair: hide the hair card mesh (default) or render it under the strands")
-    p.add_argument("--cloth-detail", nargs="?", const=1.0, type=float, metavar="AMOUNT",
-                   help="less boxy clothes: pull the inflated fit toward the body, relax it, add knit and soft "
-                        "wrinkles (AMOUNT 0..1.5, default 1)")
+    p.add_argument("--cloth-detail", action="store_true",
+                   help="less boxy clothes: pull the inflated fit toward the body, relax it, add soft folds and knit")
+    p.add_argument("--cloth-amount", type=float, default=1.0, help="0..1.5, strength of --cloth-detail")
     p.add_argument("--cloth-sim", type=int, default=0, metavar="FRAMES",
                    help="with --cloth-detail: settle the clothes with a short cloth simulation (e.g. 12 frames, ~5 s)")
     p.add_argument("--threads", type=int, default=0, help="CPU threads (0 = all)")
@@ -756,7 +756,8 @@ def cloth_detail(meshes, body, amount=1.0, sim_frames=0):
     """Take the inflated look off MakeHuman's fitted clothes: freeze each clothes mesh in its posed shape,
     pull it toward the body where it stands off (strongest where it rests on top of the shoulders, less on
     the sides so it still hangs), smooth that change over the surface, relax the mesh a little and keep it
-    outside the skin. Fabric relief (knit, soft wrinkles) is added in the material (cloth_relief)."""
+    outside the skin; optionally settle it with a short cloth simulation, then add soft folds
+    (cloth_wrinkles). The fabric's knit and fine creases are in the material (cloth_relief)."""
     import numpy as np
     t0 = time.time()
     B = full_body_mesh(body)
@@ -777,7 +778,7 @@ def cloth_detail(meshes, body, amount=1.0, sim_frames=0):
         ed = np.empty(len(me.edges) * 2, np.int64); me.edges.foreach_get("vertices", ed); ed = ed.reshape(-1, 2)
         deg = np.bincount(ed.ravel(), minlength=n).astype(float)
 
-        def neigh_mean(x):
+        def neigh_mean(x, ed=ed, deg=deg):
             acc = np.zeros_like(x)
             np.add.at(acc, ed[:, 0], x[ed[:, 1]])
             np.add.at(acc, ed[:, 1], x[ed[:, 0]])
@@ -830,8 +831,6 @@ def cloth_settle(o, body, B, frames):
     """Short cloth simulation so loose parts (sleeves, hem) hang and fold under gravity: the parts that
     touch the body (collar, shoulders, waist) and everything below the hips are pinned, the frozen body
     is the collider. The result is frozen back into the mesh."""
-    import numpy as np
-    dg = bpy.context.evaluated_depsgraph_get()
     masks = [m for m in body.modifiers if m.type == "MASK" and m.name.startswith("Delete.") and m.show_viewport]
     for m in masks:
         m.show_viewport = False
@@ -1205,7 +1204,7 @@ def main():
                 md.render_levels = a.subdiv
                 md.quality = 2
     if a.cloth_detail:
-        cloth_detail(meshes, body, a.cloth_detail, a.cloth_sim)
+        cloth_detail(meshes, body, a.cloth_amount, a.cloth_sim)
         for m in {o.active_material for o in meshes if mat_kind(o) == "clothes"}:
             cloth_relief(m)
     W, H = render_settings(a)

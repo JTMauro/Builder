@@ -153,3 +153,30 @@ def test_history_and_reply_parsing():
         talk.clean_history("{not json")
     assert talk._parse_reply('Sure: {"say": "Yo!", "gesture": "moonwalk"}') == {"say": "Yo!", "gesture": "none"}
     assert talk._parse_reply("Just text.") == {"say": "Just text.", "gesture": "none"}
+
+
+def test_studio_stages(stubs):
+    teen = stubs.stages / "teen"
+    (teen / "studio.html").write_text("<title>Studio</title>")
+    (teen / "models" / "friend.json").write_text("{}")
+    (teen / "models" / "light.json").write_text("{}")
+    for s in ("park", "beach"):
+        (teen / "sets" / s).mkdir(parents=True)
+        (teen / "sets" / s / "set.json").write_text("{}")
+    (teen / "sets" / "half_made").mkdir()   # no set.json: not offered
+    (teen / "props").mkdir()
+    (teen / "props" / "index.json").write_text('["football"]')
+    (stubs.stages / "bare").mkdir()
+    (stubs.stages / "bare" / "index.html").write_text("<title>Bare</title>")
+    with TestClient(create_app()) as c:
+        assert c.get("/studio/stages").status_code == 401
+        signed_in(c)
+        r = c.get("/studio/stages").json()
+        by = {s["name"]: s for s in r["stages"]}
+        assert by["teen"]["studio"] and by["teen"]["sets"] == ["beach", "park"] and by["teen"]["models"] == ["friend", "teen"]
+        assert "wave" in by["teen"]["moves"] and not by["bare"]["studio"] and by["bare"]["sets"] == []
+        assert r["voices"]["am_puck"]
+        assert c.get("/stages/teen/studio.html").status_code == 200
+        assert c.get("/stages/teen/props/index.json").json() == ["football"]
+        assert c.get("/stages/teen/sets/%2e%2e/%2e%2e/%2e%2e/secret.txt").status_code == 404
+    assert talk.stage_info("../teen") is None and talk.stage_info("nope") is None

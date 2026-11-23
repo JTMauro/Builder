@@ -4,6 +4,7 @@ import struct
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from media_backend import image3d, ops, storage, voice
 
@@ -52,7 +53,7 @@ def test_image_to_3d_errors(fake_model, tmp_path):
     with pytest.raises(ops.OpError, match="TripoSR failed:\nno object found"):
         ops.run_operation("image_to_3d", {"file_id": _image(tmp_path, "FAKE_FAIL.png")})
     assert [f.name for f in storage.list_files() if f.name.endswith(".glb")] == []           # failed runs leave nothing behind
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ops.run_operation("image_to_3d", {"file_id": "x", "resolution": 4096})
 
 

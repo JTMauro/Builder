@@ -493,3 +493,38 @@ dialog { width: min(560px, 94vw); }
 .talk-log .turn.them { align-self: flex-start; background: rgba(31, 181, 168, .14); }
 .talk-log .turn small { display: block; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; }
 @media (max-width: 760px) { .talk-stage-box { aspect-ratio: 4 / 5; } .talk-form .btn { flex: 1 1 auto; } }
+
+/* ================================================================ studio */
+.studio { grid-column: 1 / 3; }
+@media (max-width: 1180px) { .studio { grid-column: 1 / -1; } }
+.studio-box { aspect-ratio: 16 / 9; }
+.studio-box video { position: absolute; inset: 0; width: 100%; height: 100%; background: #000; }
+.studio-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 14px 0 4px; }
+.studio-actions .btn:not(.primary) { background: var(--panel); color: var(--ink); box-shadow: var(--sh-raised); text-decoration: none; }
+.studio-sec { margin-top: 8px; }
+.studio-sec > summary { cursor: pointer; list-style: none; }
+.studio-sec > summary::before { content: "▸ "; } .studio-sec[open] > summary::before { content: "▾ "; }
+.cast-wrap { display: grid; grid-template-columns: minmax(160px, 220px) 1fr; gap: 16px; align-items: start; }
+@media (max-width: 760px) { .cast-wrap { grid-template-columns: 1fr; } .floor { max-width: 240px; } }
+.floor { width: 100%; aspect-ratio: 1; border-radius: 16px; background: var(--panel-2); box-shadow: var(--sh-inset); touch-action: none; }
+.floor-ring { fill: none; stroke: var(--line); stroke-width: .05; }
+.floor-grid { stroke: var(--line); stroke-width: .02; }
+.floor-cam { fill: var(--muted); }
+.floor-walk { stroke-width: .07; fill: none; }
+.floor-face { stroke-width: .1; stroke-linecap: round; }
+.floor-actor { cursor: grab; } .floor-actor:focus { outline: none; } .floor-actor:focus circle { stroke: var(--ink); stroke-width: .06; }
+.floor-label { font: 700 .28px Inter, system-ui, sans-serif; fill: #fff; text-anchor: middle; pointer-events: none; }
+.cast-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; padding: 10px; border-radius: 14px; background: var(--panel-2); box-shadow: var(--sh-inset); }
+.cast-row .dot { width: 14px; height: 14px; border-radius: 50%; align-self: center; flex: none; }
+.cast-row .field { flex: 1 1 110px; } .cast-row .field.num { flex: 0 1 76px; }
+.cast-wrap .rows { margin-bottom: 10px; }
+.beats { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+.beat { padding: 10px 12px; border-radius: 14px; background: var(--panel-2); box-shadow: var(--sh-inset); }
+.beat-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.beat-tools { display: flex; gap: 4px; }
+.beat-tools .btn { padding: 4px 9px; }
+.beat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; align-items: end; }
+.beat-grid .wide2 { grid-column: span 2; }
+@media (max-width: 760px) { .beat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.studio .inline-form { margin-bottom: 8px; flex-wrap: wrap; }
+.studio .inline-form textarea, .studio .inline-form select { flex: 1 1 200px; min-width: 0; border: 0; border-radius: 12px; padding: 9px 12px; background: var(--panel-2); box-shadow: var(--sh-inset); color: var(--ink); font: inherit; }
