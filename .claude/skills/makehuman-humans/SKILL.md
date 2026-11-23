@@ -51,3 +51,9 @@ human <id>". When that arrives (or the person says "check Craft Studio"):
    `modelUrl` (the `/_blob/...` url it returns), `status: "done"`, `step: "done"` and a log line.
    On failure write `status: "failed"` and the reason.
 
+
+## Talking people
+
+To make a person talk: run `gen.py` with `MORPHS=talk`, merge with `morphs.py`, make each line with
+Builder (`speak`, then `lipsync` for mouth cues and word times), and drive the `viseme_A`–`viseme_H`
+morphs from the cues (see `tools/makehuman/view/talk.html`). Credit CMU mocap clips when used.

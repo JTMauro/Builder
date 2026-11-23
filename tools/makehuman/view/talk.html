@@ -1,0 +1,400 @@
+<title>Talking Teen</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* layout: studio stage with captions over it, then rows of controls (talk, moves, gestures, view), then credits */
+:root{--bg:#eceeef;--panel:#ffffff;--fg:#1f2326;--muted:#5f676d;--line:#d6dadd;--accent:#3f6fa3;--accent-fg:#ffffff;
+--display:"Space Grotesk",system-ui,sans-serif;--body:"Inter",system-ui,sans-serif;--mono:ui-monospace,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16191b;--panel:#1f2326;--fg:#e8ecee;--muted:#9aa3a9;--line:#32383c;--accent:#7fa6cf;--accent-fg:#0d1722;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#16191b;--panel:#1f2326;--fg:#e8ecee;--muted:#9aa3a9;--line:#32383c;--accent:#7fa6cf;--accent-fg:#0d1722;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px;margin:0}
+.wrap{max-width:1040px;margin:0 auto;display:grid;gap:12px}
+h1{font-family:var(--display);font-size:1.6rem;margin:0}
+p{margin:0;line-height:1.55;color:var(--muted);max-width:72ch}
+#stage{position:relative;width:100%;aspect-ratio:16/10;max-height:74vh;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#dfe2e4;touch-action:none}
+#stage canvas{display:block;width:100%;height:100%}
+#status{position:absolute;left:12px;bottom:10px;font:12px var(--mono);color:#4d555b}
+#now{position:absolute;right:12px;top:10px;font:600 12px var(--body);color:#3b4247;background:rgba(255,255,255,.82);padding:4px 9px;border-radius:999px}
+#cap{position:absolute;left:50%;bottom:6%;transform:translateX(-50%);max-width:86%;text-align:center;font:500 clamp(14px,2.1vw,19px)/1.4 var(--body);color:#fff;background:rgba(10,12,14,.62);padding:6px 14px;border-radius:8px}
+#cap .w{opacity:.55;transition:opacity .08s}#cap .w.on{opacity:1}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.row .lbl{font:600 12px var(--body);color:var(--muted);text-transform:uppercase;letter-spacing:.04em;min-width:64px}
+button{font:500 13px var(--body);padding:7px 13px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--fg);cursor:pointer}
+button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+button:disabled{opacity:.5;cursor:default}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+kbd{font:12px var(--mono);border:1px solid var(--line);border-radius:4px;padding:0 4px;background:var(--panel)}
+.credits{font-size:12px}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@600&display=swap">
+<div class="wrap">
+  <h1>Talking Teen</h1>
+  <p>He talks now, with a free local voice and lip-sync, and he blinks, breathes and watches you. The scene has studio light from a real HDRI, soft contact shadows, depth of field and a film grade. Tap the floor to walk there, double-tap to run, or use <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> (hold <kbd>Shift</kbd> to run). Drag to orbit.</p>
+  <div id="stage"><span id="status">Loading model, voice and moves…</span><span id="now" hidden></span><div id="cap" hidden></div></div>
+  <div class="row" id="talk"><span class="lbl">Talk</span>
+    <button type="button" data-line="hello" disabled>Hello</button>
+    <button type="button" data-line="moves" disabled>Moves?</button>
+    <button type="button" data-line="jeans" disabled>Jeans</button>
+    <button type="button" data-line="free" disabled>Free voice</button>
+    <button type="button" data-line="look" disabled>Watch me</button>
+  </div>
+  <div class="row bar"><span class="lbl">Move</span>
+    <button type="button" data-a="idle" aria-pressed="true" disabled>Idle</button>
+    <button type="button" data-a="walk" aria-pressed="false" disabled>Walk</button>
+    <button type="button" data-a="run" aria-pressed="false" disabled>Run</button>
+    <button type="button" data-a="jump" aria-pressed="false" disabled>Jump</button>
+    <button type="button" data-a="sit" aria-pressed="false" disabled>Sit</button>
+    <button type="button" data-a="dance" aria-pressed="false" disabled>Dance</button>
+    <button type="button" data-a="kick" aria-pressed="false" disabled>Kick</button>
+    <button type="button" data-a="pickup" aria-pressed="false" disabled>Pick up</button>
+    <button type="button" data-a="stretch" aria-pressed="false" disabled>Stretch</button>
+  </div>
+  <div class="row bar"><span class="lbl">Gesture</span>
+    <button type="button" data-a="wave" aria-pressed="false" disabled>Wave</button>
+    <button type="button" data-a="hello" aria-pressed="false" disabled>Big hello</button>
+    <button type="button" data-a="point" aria-pressed="false" disabled>Point</button>
+    <button type="button" data-a="thumbs up" aria-pressed="false" disabled>Thumbs up</button>
+    <button type="button" data-a="shrug" aria-pressed="false" disabled>Shrug</button>
+    <button type="button" data-a="bow" aria-pressed="false" disabled>Bow</button>
+    <button type="button" data-a="laugh" aria-pressed="false" disabled>Laugh</button>
+    <button type="button" data-a="agree" aria-pressed="false" disabled>Nod</button>
+    <button type="button" data-a="headShake" aria-pressed="false" disabled>Shake head</button>
+    <button type="button" data-a="arms crossed" aria-pressed="false" disabled>Cross arms</button>
+  </div>
+  <div class="row" id="view"><span class="lbl">View</span>
+    <button type="button" data-v="body" aria-pressed="true">Full body</button>
+    <button type="button" data-v="face" aria-pressed="false">Close-up</button>
+    <button type="button" data-f="film" aria-pressed="true">Film look</button>
+    <button type="button" data-s="sound" aria-pressed="false">Sound</button>
+  </div>
+  <p class="credits">Voice: Kokoro-82M (Apache-2.0), made on this computer by Builder <code>speak</code>, polished with <code>voice_polish</code> and <code>room_reverb</code>; mouth shapes from Builder <code>lipsync</code> (Whisper + espeak). Motion capture for jump, sit, dance, kick, pick up, stretch, big hello, shrug, bow and laugh: CMU Graphics Lab Motion Capture Database, mocap.cs.cmu.edu (created with funding from NSF EIA-0196217). Walk, run, idle, nod and head shake: three.js sample clips (MIT). Light: Studio Small 09 HDRI, Poly Haven (CC0). Person: MakeHuman (CC0).</p>
+</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { BokehPass } from "three/addons/postprocessing/BokehPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { retarget, gestures, CMU } from "./anim.js";
+
+const $ = s => document.querySelector(s);
+const stage = $("#stage"), status = $("#status"), nowEl = $("#now"), capEl = $("#cap");
+const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: !!window.__shot });
+r.setPixelRatio(Math.min(devicePixelRatio, 2)); r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 0.88; r.outputColorSpace = THREE.SRGBColorSpace;
+r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap; stage.prepend(r.domElement);
+const scene = new THREE.Scene(); const BG = 0xdfe2e4; scene.background = new THREE.Color(BG); scene.fog = new THREE.Fog(BG, 8, 20);
+const hemi = new THREE.HemisphereLight(0xe6eeff, 0x6f665c, 0.35); scene.add(hemi);
+const key = new THREE.DirectionalLight(0xfff0dc, 2.2); key.castShadow = true;
+Object.assign(key.shadow.camera, { left: -1.6, right: 1.6, top: 2.4, bottom: -1.2, near: 0.5, far: 12 }); key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0004; key.shadow.normalBias = 0.02; key.shadow.radius = 4;
+scene.add(key, key.target);
+const rim = new THREE.DirectionalLight(0xd4e0ff, 0.9); rim.position.set(-2, 2.6, -3); scene.add(rim);
+const floor = new THREE.Mesh(new THREE.CircleGeometry(14, 72), new THREE.MeshStandardMaterial({ color: 0xcfd3d6, roughness: 0.92, envMapIntensity: 0.5 }));
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+const grid = new THREE.PolarGridHelper(10, 16, 10, 64, 0xbfc5c9, 0xc6cbcf); grid.position.y = 0.002; scene.add(grid);
+const cam = new THREE.PerspectiveCamera(32, 16 / 10, 0.05, 60); cam.position.set(2.2, 1.6, 4.4);
+const ctl = new OrbitControls(cam, r.domElement); ctl.enableDamping = true; ctl.target.set(0, 0.95, 0); ctl.maxPolarAngle = Math.PI * 0.49; ctl.minDistance = 0.45; ctl.maxDistance = 12;
+
+// ---------- film pipeline: ambient occlusion, bloom, depth of field, tone map, grade + grain
+const composer = new EffectComposer(r);
+composer.addPass(new RenderPass(scene, cam));
+const gtao = new GTAOPass(scene, cam, 800, 500); gtao.blendIntensity = 0.85;
+gtao.updateGtaoMaterial({ radius: 0.22, distanceExponent: 1.4, thickness: 1.2, scale: 1.1, samples: 16 });
+composer.addPass(gtao);
+const bloom = new UnrealBloomPass(new THREE.Vector2(800, 500), 0.12, 0.5, 0.92); composer.addPass(bloom);
+const bokeh = new BokehPass(scene, cam, { focus: 4, aperture: 0.0009, maxblur: 0.006 }); composer.addPass(bokeh);
+composer.addPass(new OutputPass());
+const grade = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, t: { value: 0 }, grain: { value: 0.035 }, res: { value: new THREE.Vector2(1, 1) } },
+  vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float t, grain; uniform vec2 res; varying vec2 vUv;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    void main(){
+      vec3 c = texture2D(tDiffuse, vUv).rgb;
+      float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      c += mix(vec3(-0.012, 0.0, 0.018), vec3(0.018, 0.006, -0.012), smoothstep(0.15, 0.75, l));   // cool shadows, warm highlights
+      c = mix(vec3(l), c, 0.96);                                                                       // a touch less saturation
+      c = (c - 0.5) * 1.04 + 0.5;                                                                       // soft contrast
+      vec2 q = vUv - 0.5; c *= 1.0 - dot(q, q) * 0.42;                                                  // vignette
+      float g = h(floor(vUv * res) + fract(t) * 91.7) - 0.5; c += g * grain * (1.0 - l * 0.6);          // grain, less in highlights
+      gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+    }` });
+composer.addPass(grade);
+let film = true;
+
+function size() {
+  const w = stage.clientWidth, h = stage.clientHeight; r.setSize(w, h, false); composer.setSize(w, h);
+  cam.aspect = w / h; cam.updateProjectionMatrix(); grade.uniforms.res.value.set(w * r.getPixelRatio(), h * r.getPixelRatio());
+}
+new ResizeObserver(size).observe(stage); size();
+
+// ---------- loading (the viewer blocks fetch() of data:/blob: URLs, so .json files become GLB bytes here)
+const loader = new GLTFLoader();
+loader.register(p => { p.textureLoader = new THREE.TextureLoader(p.options.manager); return { name: "img_textures" }; });
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const parseGLB = bytes => new Promise((ok, bad) => loader.parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), "", ok, bad));
+async function getJSON(url) { const res = await fetch(url); if (!res.ok) throw new Error(url + " returned " + res.status); return res.json(); }
+async function loadGltfJson(url) {
+  const json = await getJSON(url); const uri = json.buffers[0].uri; delete json.buffers[0].uri;
+  const bin = b64(uri.slice(uri.indexOf(",") + 1)); json.buffers[0].byteLength = bin.length;
+  const js = new TextEncoder().encode(JSON.stringify(json)), jl = (js.length + 3) & ~3, bl = (bin.length + 3) & ~3;
+  const out = new Uint8Array(28 + jl + bl), dv = new DataView(out.buffer);
+  dv.setUint32(0, 0x46546C67, true); dv.setUint32(4, 2, true); dv.setUint32(8, out.length, true);
+  dv.setUint32(12, jl, true); dv.setUint32(16, 0x4E4F534A, true); out.fill(0x20, 20, 20 + jl); out.set(js, 20);
+  dv.setUint32(20 + jl, bl, true); dv.setUint32(24 + jl, 0x004E4942, true); out.set(bin, 28 + jl);
+  return parseGLB(out);
+}
+
+const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), tmpQ2 = new THREE.Quaternion(), headFwd = new THREE.Vector3(0, 0, 1);
+let boy, root, mixer, acts = {}, current = null, base = "idle", lines = {}, bones = {}, morphMeshes = [], stool, sitLow = 0.45;
+const LOOPS = new Set(["idle", "walk", "run"]);
+try {
+  const [g, bot, cmu, light, talk] = await Promise.all([loadGltfJson("models/teen.json"), loadGltfJson("clips/mixamo-clips.json"),
+    getJSON("clips/cmu-clips.json"), getJSON("models/light.json"), getJSON("sound/lines.json")]);
+
+  // image-based light from the studio HDRI
+  const hdr = new RGBELoader().parse(b64(light.hdr).buffer);
+  const tex = new THREE.DataTexture(hdr.data, hdr.width, hdr.height, THREE.RGBAFormat, hdr.type);
+  tex.colorSpace = THREE.LinearSRGBColorSpace; tex.mapping = THREE.EquirectangularReflectionMapping; tex.flipY = true; tex.needsUpdate = true;
+  const pmrem = new THREE.PMREMGenerator(r); scene.environment = pmrem.fromEquirectangular(tex).texture; pmrem.dispose();
+
+  root = g.scene; boy = new THREE.Group(); boy.add(root); scene.add(boy);
+  root.traverse(o => {
+    if (o.isBone) for (const n of ["Hips", "Spine1", "Spine2", "Neck", "Head", "LeftShoulder", "RightShoulder", "LeftFoot", "RightFoot", "LeftToeBase", "RightToeBase"]) if (o.name.endsWith(n) && !bones[n]) bones[n] = o;
+    if (!o.isMesh) return;
+    o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
+    if (o.morphTargetDictionary) morphMeshes.push(o);
+    const m = o.material, name = m?.name || "";
+    if (/brow|lash|hair/i.test(name)) { m.alphaTest = 0.2; m.transparent = false; if (/hair/i.test(name)) { m.side = THREE.FrontSide; o.receiveShadow = false; m.color.multiplyScalar(1.18); } }
+    if (name === "Skin") {   // skin: soft sheen for the light scattering in skin, a little less shiny
+      o.material = new THREE.MeshPhysicalMaterial({ map: m.map, normalMap: m.normalMap, normalScale: m.normalScale, roughness: 0.6, metalness: 0,
+        sheen: 0.35, sheenColor: new THREE.Color(0xffc4b0), sheenRoughness: 0.55, specularIntensity: 0.45, envMapIntensity: 0.65, name });
+    } else if (name === "Eye") {   // wet eyes: a clear coat catches the light
+      o.material = new THREE.MeshPhysicalMaterial({ map: m.map, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.2, name });
+    } else if (m) m.envMapIntensity = /Clothes|Shoes/.test(name) ? 0.7 : 0.9;
+  });
+
+  // motion: three.js clips + CMU motion capture, transferred to his skeleton; then posed gestures
+  const moves = retarget(bot.scene, bot.animations.filter(c => ["idle", "walk", "run", "agree", "headShake"].includes(c.name)), root);
+  for (const [label, data] of Object.entries(cmu.glb)) {
+    const cg = await parseGLB(b64(data)); const c = cg.animations[0]; c.name = label;
+    moves.push(...retarget(cg.scene, [c], root, { rename: CMU }));
+  }
+  mixer = new THREE.AnimationMixer(root);
+  const idle = moves.find(c => c.name === "idle"); mixer.clipAction(idle).play(); mixer.setTime(0); root.updateMatrixWorld(true);
+  const pose0 = new Map(); root.traverse(o => { if (o.isBone) pose0.set(o, o.quaternion.clone()); });
+  headFwd.set(0, 0, 1).applyQuaternion(bones.Head.getWorldQuaternion(new THREE.Quaternion()).invert());
+  mixer.stopAllAction();
+  for (const c of [...moves, ...gestures(root, pose0, idle)]) {
+    const a = mixer.clipAction(c); a._name = c.name;
+    if (!LOOPS.has(c.name)) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; }
+    acts[c.name] = a;
+  }
+  // how low the hips go when he sits, for the stool
+  { const a = acts.sit; a.play(); let lo = 9; for (let t = 0; t < a.getClip().duration; t += 0.1) { mixer.setTime(t); root.updateMatrixWorld(true); lo = Math.min(lo, bones.Hips.getWorldPosition(tmpV).y); } a.stop(); sitLow = lo; }
+  mixer.addEventListener("finished", e => { if (e.action === current && !LOOPS.has(current._name)) play(base); });
+  stool = makeStool(sitLow - 0.1); stool.visible = false; scene.add(stool);
+  for (const l of talk.lines) lines[l.key] = l;
+  play("idle", 0); status.textContent = "";
+  document.querySelectorAll("button[disabled]").forEach(b => b.disabled = false);
+  window.__ready = true;
+} catch (e) { console.error(e); status.textContent = "Could not load: " + e.message; window.__ready = "error"; }
+
+function makeStool(h) {
+  const wood = new THREE.MeshStandardMaterial({ color: 0x8a6a4c, roughness: 0.6 }), g = new THREE.Group();
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.035, 32), wood); top.position.y = h - 0.018; g.add(top);
+  for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + Math.PI / 4, leg = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.02, h - 0.03, 10), wood);
+    leg.position.set(Math.cos(a) * 0.13, (h - 0.03) / 2, Math.sin(a) * 0.13); g.add(leg); }
+  g.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } }); return g;
+}
+
+function play(name, fade = 0.3) {
+  const next = acts[name]; if (!next) return;
+  if (next === current) { if (!LOOPS.has(name)) next.reset().play(); return; }
+  next.reset().setEffectiveWeight(1).fadeIn(fade).play();
+  if (current) current.fadeOut(fade);
+  current = next;
+  document.querySelectorAll(".bar button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.a === name)));
+  nowEl.hidden = false; nowEl.textContent = document.querySelector(`.bar [data-a="${name}"]`)?.textContent || name;
+}
+document.querySelectorAll(".bar").forEach(bar => bar.addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b || !mixer) return;
+  const n = b.dataset.a; target = null; base = LOOPS.has(n) ? n : "idle"; play(n);
+  if (n === "sit") { stool.position.set(boy.position.x, 0, boy.position.z); stool.visible = true; }
+}));
+
+// ---------- sound: positional voice from his head, footsteps from his feet
+let listener = null, voice = null, steps = null, stepBufs = [], speaking = null, soundOn = false;
+function ensureAudio() {
+  if (listener) { listener.context.resume(); return; }
+  listener = new THREE.AudioListener(); cam.add(listener);
+  voice = new THREE.PositionalAudio(listener); voice.setRefDistance(1.2); voice.setRolloffFactor(0.6); bones.Head.add(voice);
+  steps = { L: new THREE.PositionalAudio(listener), R: new THREE.PositionalAudio(listener) };
+  bones.LeftFoot.add(steps.L); bones.RightFoot.add(steps.R);
+  for (const s of Object.values(steps)) { s.setRefDistance(1.5); s.setVolume(0.55); }
+  const ctx = listener.context, sr = ctx.sampleRate;
+  for (let v = 0; v < 6; v++) {   // a few slightly different sneaker steps: a low heel thump plus a short rubber scuff
+    const n = Math.floor(sr * 0.16), buf = ctx.createBuffer(1, n, sr), d = buf.getChannelData(0); let lp = 0, bp = 0, prev = 0;
+    const f0 = 70 + Math.random() * 25, scuff = 0.25 + Math.random() * 0.2, cut = 0.18 + Math.random() * 0.1;
+    for (let i = 0; i < n; i++) {
+      const t = i / sr, w = Math.random() * 2 - 1; lp += (w - lp) * cut; bp = lp - prev; prev = lp;
+      d[i] = Math.sin(2 * Math.PI * f0 * t) * Math.exp(-t * 38) * 0.9 + bp * scuff * Math.exp(-t * 28) * 3;
+    }
+    stepBufs.push(buf);
+  }
+  soundOn = true; $('[data-s="sound"]').setAttribute("aria-pressed", "true");
+}
+function say(key) {
+  ensureAudio(); const l = lines[key]; if (!l) return;
+  if (!l.buffer) { l.loading = listener.context.decodeAudioData(b64(l.audio).buffer.slice(0)).then(b => (l.buffer = b)); }
+  Promise.resolve(l.buffer || l.loading).then(buf => {
+    if (voice.isPlaying) voice.stop();
+    voice.setBuffer(buf); voice.play(); speaking = { l, t0: listener.context.currentTime };
+    capEl.innerHTML = l.words.map(w => `<span class="w">${w.w.replace(/[<&>]/g, "")}</span>`).join(" "); capEl.hidden = false;
+    browsKick = 1;
+  });
+}
+document.getElementById("talk").addEventListener("click", e => { const b = e.target.closest("button"); if (b) say(b.dataset.line); });
+document.getElementById("view").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.v) { closeUp = b.dataset.v === "face"; document.querySelectorAll("[data-v]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); frameView(); }
+  if (b.dataset.f) { film = !film; b.setAttribute("aria-pressed", String(film)); }
+  if (b.dataset.s) { if (!soundOn) ensureAudio(); else { soundOn = false; listener.context.suspend(); } b.setAttribute("aria-pressed", String(soundOn)); }
+});
+
+// ---------- face: lip-sync, blinks, a slight smile, brows
+const VIS = ["A", "B", "C", "D", "E", "F", "G", "H"], face = {}, faceT = {};
+function setMorph(name, v) { for (const m of morphMeshes) { if (window.__noHair && /hair/i.test(m.material.name)) continue; const i = m.morphTargetDictionary[name]; if (i !== undefined) m.morphTargetInfluences[i] = v; } }
+let nextBlink = 1.5, blinkT = -1, browsKick = 0, closeUp = false;
+function updateFace(dt, t) {
+  for (const v of VIS) faceT["viseme_" + v] = 0;
+  if (speaking) {
+    const now = listener.context.currentTime - speaking.t0, cues = speaking.l.cues;
+    if (now > speaking.l.duration + 0.2) { speaking = null; capEl.hidden = true; }
+    else {
+      let k = 0; const ahead = now + 0.04; while (k + 1 < cues.length && cues[k + 1][0] <= ahead) k++;
+      const shape = cues[k][1]; if (shape !== "X") faceT["viseme_" + shape] = shape === "A" ? 0.9 : 1;
+      const ws = capEl.children; speaking.l.words.forEach((w, i) => ws[i]?.classList.toggle("on", now >= w.s - 0.05));
+    }
+  }
+  if (t > nextBlink && blinkT < 0) { blinkT = 0; nextBlink = t + 2 + Math.random() * 3.5 + (Math.random() < 0.15 ? -1.6 : 0); }
+  let blink = 0; if (blinkT >= 0) { blinkT += dt; const p = blinkT / 0.16; blink = p < 0.45 ? p / 0.45 : Math.max(0, 1 - (p - 0.45) / 0.55); if (p >= 1) blinkT = -1; }
+  faceT.blink_L = faceT.blink_R = blink;
+  faceT.smile = speaking ? 0.12 : 0.28;
+  browsKick = Math.max(0, browsKick - dt * 1.4); faceT.brows_up = Math.sin(Math.min(1, browsKick) * Math.PI) * 0.5;
+  for (const [n, v] of Object.entries(faceT)) {
+    const fast = n.startsWith("blink") ? 1 : Math.min(1, dt * (n.startsWith("viseme") ? 22 : 6));
+    face[n] = (face[n] ?? 0) + (v - (face[n] ?? 0)) * fast; setMorph(n, face[n]);
+  }
+}
+
+// ---------- body life: breathing on top of any clip, and his head turns to look at you
+const xAx = new THREE.Vector3(1, 0, 0); let lookW = 0;
+const LOOK_OK = new Set(["idle", "walk", "wave", "point", "thumbs up", "arms crossed", "shrug", "laugh", "hello"]);
+function bodyLife(dt, t) {
+  const br = Math.sin(t * 2 * Math.PI / 4.2);   // a breath every ~4 seconds
+  bones.Spine1.quaternion.multiply(tmpQ.setFromAxisAngle(xAx, -br * 0.008));
+  bones.Spine2.quaternion.multiply(tmpQ.setFromAxisAngle(xAx, -br * 0.012));
+  root.updateMatrixWorld(true);
+  // look at the camera, within what a neck can do
+  const want = current && LOOK_OK.has(current._name) && !(base === "run") ? 1 : 0; lookW += (want - lookW) * Math.min(1, dt * 3);
+  if (lookW < 0.01 || window.__noLook) return;
+  const head = bones.Head, hp = head.getWorldPosition(tmpV);
+  const dirB = cam.position.clone().sub(hp).applyQuaternion(boy.quaternion.clone().invert()).normalize();
+  let yaw = Math.atan2(dirB.x, dirB.z), pitch = Math.asin(THREE.MathUtils.clamp(dirB.y, -1, 1));
+  const wantYaw = THREE.MathUtils.clamp(yaw, -1.0, 1.0), wantPitch = THREE.MathUtils.clamp(pitch, -0.35, 0.3);
+  if (Math.abs(yaw) > 1.9) { lookW *= 0.9; }   // he can't see behind him
+  const desired = new THREE.Vector3(Math.sin(wantYaw) * Math.cos(wantPitch), Math.sin(wantPitch), Math.cos(wantYaw) * Math.cos(wantPitch)).applyQuaternion(boy.quaternion);
+  const hq = head.getWorldQuaternion(tmpQ2), fw = headFwd.clone().applyQuaternion(hq);
+  const delta = new THREE.Quaternion().setFromUnitVectors(fw, desired);
+  const step = new THREE.Quaternion().slerp(delta, lookW * 0.8);
+  for (const [bone, share] of [[bones.Neck, 0.4], [head, 1]]) {   // neck takes part of the turn, head the rest
+    const part = new THREE.Quaternion().slerp(step, share === 1 ? 0.6 : share);
+    const wq = bone.getWorldQuaternion(new THREE.Quaternion()), pq = bone.parent.getWorldQuaternion(new THREE.Quaternion());
+    bone.quaternion.copy(pq.invert().multiply(part.multiply(wq)));
+    bone.updateMatrixWorld(true);
+  }
+}
+
+// ---------- footsteps: a step sound each time a foot lands while walking or running
+const feet = { L: { lo: 9, up: true }, R: { lo: 9, up: true } };
+function footsteps(dt) {
+  const moving = current && (current._name === "walk" || current._name === "run" || current._name === "jump" || current._name === "dance");
+  for (const k of ["L", "R"]) {
+    const f = feet[k], y = bones[k === "L" ? "LeftFoot" : "RightFoot"].getWorldPosition(tmpV).y;
+    f.lo = Math.min(f.lo + dt * 0.02, y);
+    if (f.up && y < f.lo + 0.012) { f.up = false; if (moving && soundOn && steps) { const s = steps[k]; if (s.isPlaying) s.stop();
+      s.setBuffer(stepBufs[(Math.random() * stepBufs.length) | 0]); s.setPlaybackRate(0.92 + Math.random() * 0.16); s.setVolume(current._name === "run" ? 0.8 : 0.5); s.play(); } }
+    else if (!f.up && y > f.lo + 0.04) f.up = true;
+  }
+}
+
+// ---------- moving around: tap the floor to walk there, double-tap to run there, or WASD / arrows
+let target = null, steer = null; const SPEED = { walk: 1.15, run: 3.4 };
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(); let downAt = null, lastTap = 0;
+r.domElement.addEventListener("pointerdown", e => { downAt = [e.clientX, e.clientY]; });
+r.domElement.addEventListener("pointerup", e => {
+  if (!downAt || !boy || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;   // a drag orbits the camera
+  const rect = r.domElement.getBoundingClientRect(); ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+  ray.setFromCamera(ndc, cam); const hit = ray.intersectObject(floor)[0]; if (!hit) return;
+  const now = performance.now(), run = now - lastTap < 320; lastTap = now;
+  target = hit.point.clone(); target.y = 0; base = run ? "run" : "walk"; play(base); stool.visible = false;
+});
+const keys = new Set();
+addEventListener("keydown", e => { if (/^(Arrow|Key[WASD]|Shift)/.test(e.code)) { keys.add(e.code); if (e.code.startsWith("Arrow")) e.preventDefault(); } });
+addEventListener("keyup", e => keys.delete(e.code));
+
+function frameView() {
+  if (!boy) return;
+  const hy = closeUp ? bones.Head.getWorldPosition(tmpV).y + 0.02 : 0.95;
+  const fw = new THREE.Vector3(0, 0, 1).applyQuaternion(boy.quaternion), side = new THREE.Vector3(fw.z, 0, -fw.x);
+  ctl.target.set(boy.position.x, hy, boy.position.z);
+  const d = closeUp ? 0.85 : 4.6;
+  cam.position.copy(ctl.target).addScaledVector(fw, d * 0.94).addScaledVector(side, d * (closeUp ? 0.1 : 0.42)); cam.position.y = hy + (closeUp ? 0.03 : 0.6);
+}
+window.__frame = frameView; window.__dbg = () => ({ root, morphMeshes, listener, speaking }); window.__say = say; window.__play = play;
+
+const clock = new THREE.Clock();
+r.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+  if (mixer) {
+    mixer.update(dt); root.updateMatrixWorld(true);
+    bodyLife(dt, t); updateFace(dt, t); footsteps(dt);
+    if (stool.visible && current?._name !== "sit") stool.visible = false;
+  }
+  if (boy) {
+    const fw = (keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0) - (keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0);
+    const sd = (keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0) - (keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0);
+    let dir = null, mode = null;
+    if (fw || sd) {
+      const f = new THREE.Vector3(); cam.getWorldDirection(f); f.y = 0; f.normalize(); const s = new THREE.Vector3(-f.z, 0, f.x);
+      dir = f.multiplyScalar(fw).add(s.multiplyScalar(sd)).normalize(); mode = keys.has("ShiftLeft") || keys.has("ShiftRight") ? "run" : "walk"; target = null;
+      if (base !== mode) { base = mode; play(mode); }
+    } else if (target) {
+      tmpV.copy(target).sub(boy.position); tmpV.y = 0;
+      if (tmpV.length() < 0.12) { target = null; base = "idle"; play("idle"); } else { dir = tmpV.clone().normalize(); mode = base; }
+    } else if (steer === "kb") { steer = null; base = "idle"; play("idle"); }
+    if (fw || sd) steer = "kb";
+    if (dir && (mode === "walk" || mode === "run")) {
+      const want = Math.atan2(dir.x, dir.z); let d = want - boy.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
+      boy.rotation.y += d * Math.min(1, dt * 10);
+      boy.position.addScaledVector(dir, SPEED[mode] * dt);
+      if (boy.position.length() > 9.5) boy.position.setLength(9.5);
+    }
+    // camera and light follow him; focus on his face
+    const hy = closeUp ? bones.Head.getWorldPosition(tmpV).y + 0.02 : 0.95;
+    const goal = new THREE.Vector3(boy.position.x, hy, boy.position.z), delta = goal.sub(ctl.target);
+    delta.y *= Math.min(1, dt * 4); ctl.target.add(delta); cam.position.add(delta);
+    key.position.set(boy.position.x + 1.6, 3.2, boy.position.z + 1.8); key.target.position.copy(boy.position);
+    bokeh.uniforms.focus.value = cam.position.distanceTo(bones.Head.getWorldPosition(tmpV));
+    bokeh.uniforms.aperture.value = closeUp ? 0.004 : 0.0009;
+  }
+  ctl.update();
+  if (film) { grade.uniforms.t.value = t; composer.render(dt); } else r.render(scene, cam);
+});
+</script>

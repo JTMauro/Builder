@@ -121,3 +121,21 @@ Posture: only arms and legs are matched to the source rest pose (bending the spi
 
 Both return ordinary `AnimationClip`s. `view/anim.html` + `view/animshot.js` render test frames.
 
+
+## Talking: mouth shapes, blinks and a voice
+
+- `MORPHS=talk` makes `gen.py` also export one GLB per expression (`OUT__viseme_A.glb` … `viseme_H`,
+  `blink_L`, `blink_R`, `smile`, `brows_up`, `brows_frown`) plus `OUT__variants.json`. Teeth are added
+  so open mouths aren't empty.
+- `python3 -I morphs.py OUT.glb OUT__variants.json OUT_morph.glb` merges them into one GLB as named
+  morph targets (`mesh.extras.targetNames`; three.js puts them in `morphTargetDictionary`). Targets are
+  sparse (only the vertices that move), so 13 expressions add about 1.5 MB.
+- The mouth shapes are Rhubarb's A–H (X = closed/rest), the same letters Builder's `lipsync` returns.
+  Make a line with Builder: `speak` → `lipsync` (mouth cues + word times) → `voice_polish` → `room_reverb`.
+- `view/talk.html` is the full viewer: lip-sync with smoothing, random blinks, breathing, head look-at,
+  positional voice and procedural footsteps, HDRI light, GTAO, bloom, depth of field and a grade/grain
+  pass, plus CMU motion-capture moves (credit: mocap.cs.cmu.edu, NSF EIA-0196217). It expects
+  `models/teen.json`, `models/light.json` (base64 .hdr), `clips/mixamo-clips.json`,
+  `clips/cmu-clips.json` (base64 GLBs by label) and `sound/lines.json` next to it.
+- CMU clips: `retarget(src, clips, tgt, { rename: CMU })` maps the CMU ASF bone names; each clip's
+  facing is taken from its first frame, so all moves face forward.

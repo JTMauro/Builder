@@ -2,7 +2,7 @@
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script></head><body>
 <script type="module">
 import * as THREE from "three"; import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { retarget, gestures } from "./anim.js";
+import { retarget, gestures, CMU } from "./anim.js";
 const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); r.setSize(innerWidth, innerHeight);
 r.toneMapping = THREE.ACESFilmicToneMapping; r.outputColorSpace = THREE.SRGBColorSpace; r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap; document.body.appendChild(r.domElement);
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0xe9ebec);
@@ -17,6 +17,13 @@ const root = boy.scene; scene.add(root);
 root.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; o.frustumCulled = false; if (/brow|lash|hair/i.test(o.material?.name || "")) { o.material.alphaTest = 0.2; o.material.transparent = false; if (/hair/i.test(o.material.name)) { o.material.side = THREE.FrontSide; o.receiveShadow = false; } } } });
 const t0 = performance.now();
 const moves = retarget(bot.scene, bot.animations, root);
+const CMU_CLIPS = { jump: "118_01-jump", sit: "113_15-sit-in-chair-and-get-up", dance: "05_02-dance-expressive-arms-pirouette", shrug: "111_25-shrug",
+  bow: "111_02-bow", stretch: "141_13-stretch-and-yawn", kick: "10_03-soccer-kick-ball", pickup: "111_17-pick-up", hello: "141_16-wave-hello", laugh: "13_14-laugh" };
+for (const [label, id] of Object.entries(CMU_CLIPS)) {
+  const g = await L.loadAsync("../cmu/" + id + ".glb");
+  const c = g.animations[0]; c.name = label;
+  moves.push(...retarget(g.scene, [c], root, { rename: CMU, inPlace: label !== "sit" && label !== "jump" ? true : true }));
+}
 const mixer = new THREE.AnimationMixer(root);
 const idle = moves.find(c => c.name === "idle"); mixer.clipAction(idle).play(); mixer.setTime(0); root.updateMatrixWorld(true);
 const base = new Map(); root.traverse(o => { if (o.isBone) base.set(o, o.quaternion.clone()); });

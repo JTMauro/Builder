@@ -7,11 +7,19 @@ import * as THREE from "three";
 const V = THREE.Vector3, Q = THREE.Quaternion;
 const key = n => n.replace(/[:_]/g, "").toLowerCase();
 
-export function boneMap(root) {
+export function boneMap(root, rename = null) {
   const m = {};
-  root.traverse(o => { if (o.isBone) m[key(o.name)] = o; });
+  root.traverse(o => { if (o.isBone || (rename && rename[o.name])) { const n = rename ? rename[o.name] : o.name; if (n) m[key(rename ? "mixamorig" + n : n)] = o; } });
   return m;
 }
+// CMU motion capture (ASF/AMC skeleton names) to Mixamo names
+export const CMU = {
+  root: "Hips", lfemur: "LeftUpLeg", ltibia: "LeftLeg", lfoot: "LeftFoot", ltoes: "LeftToeBase",
+  rfemur: "RightUpLeg", rtibia: "RightLeg", rfoot: "RightFoot", rtoes: "RightToeBase",
+  lowerback: "Spine", upperback: "Spine1", thorax: "Spine2", lowerneck: "Neck", head: "Head",
+  lclavicle: "LeftShoulder", lhumerus: "LeftArm", lradius: "LeftForeArm", lhand: "LeftHand",
+  rclavicle: "RightShoulder", rhumerus: "RightArm", rradius: "RightForeArm", rhand: "RightHand",
+};
 const wq = o => o.getWorldQuaternion(new Q());
 const wp = o => o.getWorldPosition(new V());
 const order = root => { const out = []; root.traverse(o => { if (o.isBone) out.push(o); }); return out; };   // parents first
@@ -38,15 +46,21 @@ const firstMappedChild = (b, M) => b.children.find(c => c.isBone && M[key(c.name
  * Retarget clips from a source Mixamo rig (src root, in its rest pose) onto the target rig (tgt root,
  * in its rest pose). Both face +Z. Returns baked clips for the target.
  */
-export function retarget(srcRoot, clips, tgtRoot, { fps = 30, inPlace = true, lean = { idle: 0.015, walk: 0.07, run: 0.30, default: 0.015 }, neck = 0, head = 0 } = {}) {
+export function retarget(srcRoot, clips, tgtRoot, { fps = 30, inPlace = true, lean = { idle: 0.015, walk: 0.07, run: 0.30, default: 0.015 }, neck = 0, head = 0, rename = null } = {}) {
   // a slight natural forward lean through the spine (radians at the top of the spine), head kept level
   // per move: how far the spine leans forward (radians at its top). The head keeps only a third of it, so he looks ahead.
   const leanOf = name => typeof lean === "number" ? lean : (lean[name] ?? lean.default ?? 0);
   const leanMap = L => ({ mixamorigspine: L / 3, mixamorigspine1: (2 * L) / 3, mixamorigspine2: L, mixamorigneck: L * 0.6 + neck, mixamorighead: L * 0.33 + neck + head });
   const xAxis = new V(1, 0, 0);
-  const S = boneMap(srcRoot), T = boneMap(tgtRoot);
+  const S = boneMap(srcRoot, rename), T = boneMap(tgtRoot);
   const names = Object.keys(T).filter(k => S[k]);
   srcRoot.updateMatrixWorld(true); tgtRoot.updateMatrixWorld(true);
+  // turn the source to face the same way as the target (from the line between the hips)
+  const flat = (a, b) => { const v = wp(a).sub(wp(b)); v.y = 0; return v.normalize(); };
+  const F = new Q().setFromUnitVectors(flat(S["mixamorigleftupleg"], S["mixamorigrightupleg"]), flat(T["mixamorigleftupleg"], T["mixamorigrightupleg"]));
+  const Fi = F.clone().invert();
+  const swq = o => F.clone().multiply(wq(o));                 // source world rotation, turned to face the target's way
+  const swp = o => wp(o).applyQuaternion(F);
   const tRest = new Map(order(tgtRoot).map(b => [b, b.quaternion.clone()]));
   // 1. bend the target into the source's rest pose by matching bone directions
   // arms and legs differ in rest pose (MPFB rests in an A-pose, Mixamo in a T-pose); the spine, neck and
@@ -54,15 +68,15 @@ export function retarget(srcRoot, clips, tgtRoot, { fps = 30, inPlace = true, le
   for (const b of order(tgtRoot)) {
     const k = key(b.name); if (!S[k]) continue;
     if (!/shoulder|arm|hand|upleg|leg|foot|toe/.test(k)) continue;
-    const c = firstMappedChild(b, T); if (!c) continue;
+    const c = b.children.find(ch => ch.isBone && T[key(ch.name)] && S[key(ch.name)]); if (!c) continue;
     const sc = S[key(c.name)];
-    aim(b, c, wp(sc).sub(wp(S[k])).normalize());
+    aim(b, c, swp(sc).sub(swp(S[k])).normalize());
   }
   tgtRoot.updateMatrixWorld(true);
   const sRef = {}, tRef = {};
-  for (const k of names) { sRef[k] = wq(S[k]); tRef[k] = wq(T[k]); }
+  for (const k of names) { sRef[k] = swq(S[k]); tRef[k] = wq(T[k]); }
   const hipS = S["mixamorighips"], hipT = T["mixamorighips"];
-  const scale = wp(hipT).y / Math.max(1e-6, wp(hipS).y), hipS0 = wp(hipS), hipT0 = wp(hipT);
+  const scale = wp(hipT).y / Math.max(1e-6, wp(hipS).y), hipS0 = swp(hipS), hipT0 = wp(hipT);
   const tOrder = order(tgtRoot).filter(b => S[key(b.name)]);
   const out = [];
   const mixer = new THREE.AnimationMixer(srcRoot);
@@ -70,21 +84,27 @@ export function retarget(srcRoot, clips, tgtRoot, { fps = 30, inPlace = true, le
     const src = clip.clone();   // keep the hips track: its height gives the bounce; x/z are dropped below when inPlace
     mixer.stopAllAction(); const act = mixer.clipAction(src); act.play();
     const LEAN = leanMap(leanOf(clip.name));
+    // each clip starts facing the target's forward: undo the actor's heading at the first frame
+    mixer.setTime(0); srcRoot.updateMatrixWorld(true);
+    const Y0 = new Q().setFromUnitVectors(flat(S["mixamorigleftupleg"], S["mixamorigrightupleg"]).applyQuaternion(F), flat(T["mixamorigleftupleg"], T["mixamorigrightupleg"]));
+    const yawFix = Math.abs(1 - Y0.w) > 1e-4 ? Y0 : null;
     const n = Math.max(2, Math.round(clip.duration * fps) + 1), times = [];
     const q = new Map(tOrder.map(b => [b, []])), hp = [];
     for (let i = 0; i < n; i++) {
       const t = Math.min(clip.duration, i / fps); times.push(t); mixer.setTime(t); srcRoot.updateMatrixWorld(true);
       for (const b of tOrder) {
         const k = key(b.name);
-        const W = wq(S[k]).multiply(sRef[k].clone().invert()).multiply(tRef[k]);
+        const W = swq(S[k]).multiply(sRef[k].clone().invert()).multiply(tRef[k]);
+        if (yawFix) W.premultiply(yawFix);
         if (LEAN[k]) W.premultiply(new Q().setFromAxisAngle(xAxis, LEAN[k]));
         b.parent.updateWorldMatrix(true, false);
         b.quaternion.copy(wq(b.parent).invert().multiply(W)); b.updateWorldMatrix(false, false);
         q.get(b).push(...b.quaternion.toArray());
       }
-      const d = wp(hipS).sub(hipS0).multiplyScalar(scale); if (inPlace) { d.x = 0; d.z = 0; }
+      const d = swp(hipS).sub(hipS0).multiplyScalar(scale); if (yawFix) d.applyQuaternion(yawFix); if (inPlace) { d.x = 0; d.z = 0; }
       const p = hipT0.clone().add(d); hp.push(...hipT.parent.worldToLocal(p).toArray());
     }
+    void Fi;
     const tracks = tOrder.map(b => new THREE.QuaternionKeyframeTrack(b.name + ".quaternion", times, q.get(b)));
     tracks.push(new THREE.VectorKeyframeTrack(hipT.name + ".position", times, hp));
     out.push(new THREE.AnimationClip(clip.name, clip.duration, tracks));

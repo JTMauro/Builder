@@ -16,6 +16,7 @@ Settings (environment variables):
   SMILE     0 neutral .. 1 broad smile with teeth          default 0
   SHAPE     extra shape targets "group/target:weight,..." (see mpfb/data/targets), e.g. a longer neck
   FRINGE    brow (lift hair that falls below the eyebrows) | keep   default brow
+  MORPHS    talk: also export expression variants (speech mouth shapes, blinks, smile, brows) for morphs.py
 Writes $S/mhgen/<OUT>.glb (and .blend). Convert for three.js with glb2json.py.
 """
 import json
@@ -94,8 +95,11 @@ if SMILE > 0:
         f = os.path.join(U, unit + ".target.gz")
         if os.path.exists(f):
             TargetService.load_target(body, f, weight=w * SMILE, name="smile-" + unit)
-    if os.path.exists(A + "/teeth/teeth_shape01/teeth_shape01.mhclo"):
-        objs["teeth"] = HumanService.add_mhclo_asset(A + "/teeth/teeth_shape01/teeth_shape01.mhclo", body, asset_type="Teeth", subdiv_levels=0, material_type="MAKESKIN")
+
+
+# teeth: for a smile, or for talking (the mouth opens)
+if (SMILE > 0 or E("MORPHS", "") == "talk") and os.path.exists(A + "/teeth/teeth_shape01/teeth_shape01.mhclo"):
+    objs["teeth"] = HumanService.add_mhclo_asset(A + "/teeth/teeth_shape01/teeth_shape01.mhclo", body, asset_type="Teeth", subdiv_levels=0, material_type="MAKESKIN")
 
 # MPFB's node materials don't export to glTF: replace each with a plain Principled BSDF + image textures
 # clothes normal maps are strong; softer creases look more like real cotton (exported as normalTexture.scale)
@@ -228,3 +232,48 @@ bpy.ops.object.select_all(action="DESELECT")
 bpy.ops.export_scene.gltf(filepath=f"{G}/{OUT}.glb", export_format="GLB", export_apply=True,
                           export_animations=False, export_morph=False, export_yup=True)
 print("wrote", f"{G}/{OUT}.glb")
+
+# ---------------------------------------------------------------- expressions as morph targets
+# MORPHS=talk exports one extra GLB per expression (mouth shapes for speech, blinks, smile, brows) with the
+# proxies (lashes, brows, teeth) refitted; morphs.py then merges them into the main GLB as morph targets.
+EXPRESSIONS = {
+    "viseme_A": {"mouth-compression": 0.7},                                   # M B P
+    "viseme_B": {"mouth-open": 0.12, "mouth-retraction": 0.35},               # most consonants, EE
+    "viseme_C": {"mouth-open": 0.3, "mouth-retraction": 0.25},                # EH AE
+    "viseme_D": {"mouth-open": 0.68},                                         # AA
+    "viseme_E": {"mouth-open": 0.28, "mouth-pursing": 0.35},                  # AO ER
+    "viseme_F": {"mouth-pursing": 0.85, "mouth-open": 0.08},                  # OO W
+    "viseme_G": {"mouth-open": 0.06, "mouth-retraction": 0.2, "mouth-compression": 0.3},   # F V
+    "viseme_H": {"mouth-open": 0.34, "mouth-retraction": 0.1},                # L
+    "blink_L": {"eye-left-closure": 1.0},
+    "blink_R": {"eye-right-closure": 1.0},
+    "smile": {"mouth-corner-puller": 0.95, "mouth-upward-retraction": 0.35, "mouth-open": 0.18, "mouth-parling": 0.25,
+              "eye-left-slit": 0.18, "eye-right-slit": 0.18},
+    "brows_up": {"eyebrows-left-up": 0.7, "eyebrows-right-up": 0.7},
+    "brows_frown": {"eyebrows-left-down": 0.6, "eyebrows-right-down": 0.6, "eyebrows-left-inner-up": 0.0},
+}
+if E("MORPHS", "") == "talk":
+    import bl_ext.user_default.mpfb as _mpfb2
+    from bl_ext.user_default.mpfb.services import ClothesService, TargetService as _TS2
+
+    UD = os.path.join(os.path.dirname(_mpfb2.__file__), "data", "targets", "expression", "units", "caucasian")
+    units = sorted({u for e in EXPRESSIONS.values() for u in e})
+    keys = {}
+    for u in units:
+        f = os.path.join(UD, u + ".target.gz")
+        if os.path.exists(f):
+            keys[u] = _TS2.load_target(body, f, weight=0.0, name="x-" + u).name
+    proxies = [o for k, o in objs.items() if k != "high-poly"]
+    variants = {}
+    for name, weights in EXPRESSIONS.items():
+        for u, kname in keys.items():
+            body.data.shape_keys.key_blocks[kname].value = weights.get(u, 0.0)
+        for o in proxies:
+            ClothesService.fit_clothes_to_human(o, body, set_parent=False)
+        path = f"{G}/{OUT}__{name}.glb"
+        bpy.ops.object.select_all(action="DESELECT")
+        bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", export_apply=True,
+                                  export_animations=False, export_morph=False, export_yup=True)
+        variants[name] = path
+    json.dump(variants, open(f"{G}/{OUT}__variants.json", "w"), indent=1)
+    print("expression variants:", ", ".join(variants))
