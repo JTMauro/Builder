@@ -787,3 +787,5 @@ from . import director as _director_ops  # noqa: E402,F401  (direct_scene, make_
 from . import image3d as _image3d_ops  # noqa: E402,F401  (image_to_3d)
 from . import characters as _character_ops  # noqa: E402,F401  (make_character, library_list, library_get, library_save_scene, export_character)
 from . import film as _film_ops  # noqa: E402,F401  (make_film, dub_scene, dub_video, make_short)
+from . import review as _review_ops  # noqa: E402,F401  (review_video, describe_audio)
+from . import extras as _extra_ops  # noqa: E402,F401  (separate_stems, remove_background, clean_speech, optimize_model)

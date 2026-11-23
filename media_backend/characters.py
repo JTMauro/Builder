@@ -478,7 +478,7 @@ class MakeCharacterParams(BaseModel):
 
 @operation("make_character", MakeCharacterParams, "Make a new realistic 3D person from a description (Claude picks MakeHuman settings from the installed hair, outfits, shoes and eye colours, a voice and a persona) or from explicit params; builds it with MakeHuman (about 30 s), adds it to a stage as models/<name>.json for scene_video, and saves it to the character library. Refuses real people and famous characters.")
 def make_character(p: MakeCharacterParams) -> OpResult:
-    if not p.description and not p.params:
+    if not p.description and p.params is None:
         raise OpError("give a description or params")
     why = refuses(p.description) or refuses(p.persona)
     if why:

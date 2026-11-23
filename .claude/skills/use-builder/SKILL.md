@@ -88,6 +88,19 @@ Cycles stills; `video_to_motion` captures body and face from a video; `style_che
 catch unwanted changes against approved pictures. Rendering is slow on CPU (720p about 2–4 s a frame);
 start long jobs with `wait=false`.
 
+**Check your work before delivering**: run `review_video` on any video you made (look at its contact sheet
+and motion map; read `issues`: frozen or black stretches, jitter, flicker, soft frames) and `describe_audio`
+on anything with sound (read `description`: clipping, true peak, harshness, tempo, a monotone voice). They are
+heuristics, not eyes and ears, but they catch what a single still frame can't show.
+
+New characters: `make_character` (a description, or `params` with no Claude key) builds a MakeHuman person,
+puts it on a stage as `models/<name>.json` and saves it to the library with its voice and persona; use it in
+`scene_video` as a cast member's `model`. `library_list` shows characters, stages, sets, voices and scene
+templates; `library_save_scene` / `library_get` keep reusable `scene_video` params (cast voices come from the
+library). `export_character` makes a game-ready `.glb` with the moves as named clips (three.js:
+`AnimationClip.findByName(gltf.animations, 'walk')`; Godot: the AnimationPlayer). Never make real people or
+famous characters; the tools refuse descriptions that name them.
+
 ### Talk to a character live
 
 The web app's **Talk** tab (or `POST /talk`, multipart: `audio` as webm/ogg/wav or `text`, plus `character`

@@ -239,13 +239,14 @@ function play(a, name, fade = 0.3) {
 // actor holding one gets a clone, parented to the hand bone. GRIP places the prop's centre in the right palm (hand-bone
 // space, metres) and turns it (degrees); the left hand mirrors it. node: which piece of a file with several variants.
 const GRIP = {
-  _default: { pos: [0.0, 0.09, 0.035], rot: [0, 0, 0] },
-  football: { node: "football_inflated", pos: [0.0, 0.10, 0.10], rot: [0, 0, 0] },
-  baseball_bat: { pos: [0.0, 0.08, 0.03], rot: [0, 0, 90], grip: [0, 0, -0.55] },
-  classic_laptop: { pos: [0.0, 0.07, 0.17], rot: [90, 0, 0] },
-  binder_notebook: { node: "binder_notebook_closed", pos: [0.0, 0.08, 0.06], rot: [90, 0, 0] },
-  Megaphone_01: { pos: [0.0, 0.09, 0.05], rot: [0, 0, 0] },
-  plastic_bottle_gallon: { pos: [0.0, 0.08, 0.09], rot: [0, 0, 0] },
+  _default: { pos: [0.0, 0.10, 0.04], rot: [0, 0, 0] },
+  football: { node: "football_inflated", pos: [0.0, 0.13, 0.07], rot: [0, 0, 0] },
+  baseball_bat: { pos: [0.33, 0.08, 0.03], rot: [0, 0, -90] },
+  classic_laptop: { pos: [0.0, 0.30, 0.02], rot: [90, 0, 0], prep: o => {   // closed, carried by its edge
+    const scr = o.getObjectByName("classic_laptop_screen"); if (scr) { scr.rotation.x = Math.PI / 2; scr.position.y += 0.012; } } },
+  binder_notebook: { node: "binder_notebook_closed", pos: [0.0, 0.14, 0.02], rot: [90, 0, 0] },
+  Megaphone_01: { pos: [0.0, 0.10, 0.05], rot: [0, 0, 0] },
+  plastic_bottle_gallon: { pos: [0.0, 0.20, 0.02], rot: [180, 0, 0] },
 };
 const props = {};
 async function loadProp(id) {
@@ -253,7 +254,7 @@ async function loadProp(id) {
   props[id] ||= loader.loadAsync(`props/${id}/${id}_1k.gltf`).then(g => {
     const g0 = GRIP[id] || GRIP._default; let obj = g.scene;
     if (g0.node) { const n = obj.getObjectByName(g0.node); if (n) { n.parent.remove(n); n.position.set(0, 0, 0); obj = new THREE.Group(); obj.add(n); } }
-    obj.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+    g0.prep?.(obj); obj.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
     obj.updateMatrixWorld(true);
     const c = new THREE.Box3().setFromObject(obj).getCenter(new V()), piece = new THREE.Group();   // centre it, plus any grip point
     obj.position.sub(c); if (g0.grip) obj.position.sub(new V(...g0.grip)); piece.add(obj); return piece;
@@ -414,7 +415,7 @@ try {
 } catch (e) { console.error(e); status.textContent = "Could not load: " + e.message; window.__ready = "error"; }
 
 window.__prepare = async () => Object.keys(actors);
-window.__actors = actors; window.__grip = GRIP; window.__cam = cam;   // for tuning grips from the console
+window.__actors = actors; window.__grip = GRIP; window.__cam = cam; window.__loadProp = loadProp; window.__three = scene;   // for tuning grips from the console
 window.__step = async dt => frame(dt);
 window.__events = () => events;
 if (live && window.__ready === true) { const clock = new THREE.Clock(); r.setAnimationLoop(() => { const dt = Math.min(clock.getDelta(), 0.05); if (simT > S.duration) restart(); frame(dt); }); }

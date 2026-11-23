@@ -147,6 +147,8 @@ def stage_moves(stage: str) -> list[str]:
 
 @operation("scene_video", SceneParams, "Make a finished video of a 3D character acting out a scene: give beats (lines to say, moves, camera, walking); Builder voices each line, lip-syncs it, renders the stage frame by frame, adds footsteps, optional original music, captions and a film look. Long: start with wait=false.")
 def scene_video(p: SceneParams) -> OpResult:
+    from .characters import resolve_cast   # library characters bring their own voices
+    p.cast = resolve_cast(p.cast)
     stage = stages_dir() / p.stage
     if not (stage / "index.html").exists():
         raise OpError(f"no stage called {p.stage!r} (have: {', '.join(list_stages()) or 'none'}); build one with tools/makehuman/make_stage.py")

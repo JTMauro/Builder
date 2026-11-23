@@ -76,6 +76,29 @@ def dense_volume(density, n: int, threshold: float):
     return vol.numpy(), m ** 3 + len(idx)
 
 
+def pick_threads(torch) -> int:
+    """Some machines (busy or virtual ones) make multi-threaded matrix maths collapse, e.g. 30 s instead of
+    0.2 s for one of TripoSR's layers. Time that layer and use fewer threads when it is pathologically slow."""
+    if os.environ.get("IMAGE3D_THREADS"):
+        torch.set_num_threads(max(1, int(os.environ["IMAGE3D_THREADS"])))
+        return torch.get_num_threads()
+    x, w = torch.randn(512, 4096), torch.randn(1024, 4096)
+    x[:8] @ w.t()   # warm up
+    best, n = None, torch.get_num_threads()
+    while n >= 1:
+        torch.set_num_threads(n)
+        t = time.time()
+        x @ w.t()
+        dt = time.time() - t
+        if best is None or dt < best[0]:
+            best = (dt, n)
+        if dt < 0.4:   # about 10 GFLOPS; a healthy CPU does this in well under 0.1 s
+            break
+        n //= 2
+    torch.set_num_threads(best[1])
+    return best[1]
+
+
 def load_model(TSR, weights: str):
     import torch
     from omegaconf import OmegaConf
@@ -130,7 +153,8 @@ def main() -> None:
     t0 = time.time()
     times: dict[str, float] = {}
     device = "cuda" if a.device == "auto" and torch.cuda.is_available() else "cpu"
-    torch.set_num_threads(max(1, os.cpu_count() or 1))
+    if device == "cpu":
+        pick_threads(torch)
 
     model = load_model(TSR, a.weights)
     model.renderer.set_chunk_size(8192)
@@ -173,6 +197,8 @@ def main() -> None:
     verts, faces, _, _ = marching_cubes(vol, a.threshold, gradient_direction="descent")
     verts = verts / (n - 1) * 2 * radius - radius
     mesh = trimesh.Trimesh(verts, faces, process=True)
+    if mesh.volume < 0:   # normals must point outwards, or viewers cull the outside and show the inside
+        mesh.invert()
     parts = mesh.split(only_watertight=False)
     if len(parts) > 1:   # drop floating specks
         mesh = trimesh.util.concatenate([p for p in parts if len(p.faces) >= 0.02 * len(mesh.faces)] or [max(parts, key=lambda p: len(p.faces))])
@@ -191,6 +217,7 @@ def main() -> None:
     mesh.export(a.out)
     times["export_s"] = time.time() - t
     times = {k: round(v, 1) for k, v in times.items()}
+    times["threads"] = torch.get_num_threads()
     print(json.dumps({"vertices": len(mesh.vertices), "faces": len(mesh.faces), "watertight": bool(mesh.is_watertight),
                       "extent": [round(float(x), 3) for x in mesh.extents], "device": device, "total_s": round(time.time() - t0, 1), **times}))
 

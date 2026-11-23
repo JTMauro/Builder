@@ -85,6 +85,11 @@ def parse_args(argv):
     p.add_argument("--hair-melanin", help="M or M,REDNESS (0..1) for --strand-hair (default: from the hair colour)")
     p.add_argument("--hair-cards", choices=["hide", "keep"], default="hide",
                    help="with --strand-hair: hide the hair card mesh (default) or render it under the strands")
+    p.add_argument("--cloth-detail", nargs="?", const=1.0, type=float, metavar="AMOUNT",
+                   help="less boxy clothes: pull the inflated fit toward the body, relax it, add knit and soft "
+                        "wrinkles (AMOUNT 0..1.5, default 1)")
+    p.add_argument("--cloth-sim", type=int, default=0, metavar="FRAMES",
+                   help="with --cloth-detail: settle the clothes with a short cloth simulation (e.g. 12 frames, ~5 s)")
     p.add_argument("--threads", type=int, default=0, help="CPU threads (0 = all)")
     p.add_argument("--save-blend", help="also save the lit scene as a .blend (for checking in Blender)")
     return p.parse_args(argv)
@@ -734,6 +739,217 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
     return o
 
 
+# ---------------------------------------------------------------- clothes detail (--cloth-detail)
+def full_body_mesh(body):
+    """world_mesh of the body with the clothes' "Delete.*" masks off (the skin under the clothes is there)."""
+    masks = [m for m in body.modifiers if m.type == "MASK" and m.name.startswith("Delete.") and m.show_viewport]
+    for m in masks:
+        m.show_viewport = False
+    try:
+        return world_mesh(body)
+    finally:
+        for m in masks:
+            m.show_viewport = True
+
+
+def cloth_detail(meshes, body, amount=1.0, sim_frames=0):
+    """Take the inflated look off MakeHuman's fitted clothes: freeze each clothes mesh in its posed shape,
+    pull it toward the body where it stands off (strongest where it rests on top of the shoulders, less on
+    the sides so it still hangs), smooth that change over the surface, relax the mesh a little and keep it
+    outside the skin. Fabric relief (knit, soft wrinkles) is added in the material (cloth_relief)."""
+    import numpy as np
+    t0 = time.time()
+    B = full_body_mesh(body)
+    dg = bpy.context.evaluated_depsgraph_get()
+    done = []
+    for o in meshes:
+        if mat_kind(o) != "clothes":
+            continue
+        ev = o.evaluated_get(dg)
+        me = bpy.data.meshes.new_from_object(ev, preserve_all_data_layers=True, depsgraph=dg)
+        me.transform(ev.matrix_world)
+        o.modifiers.clear()
+        o.parent = None
+        o.matrix_world = Matrix.Identity(4)
+        o.data = me
+        n = len(me.vertices)
+        co = np.empty(n * 3); me.vertices.foreach_get("co", co); co = co.reshape(-1, 3)
+        ed = np.empty(len(me.edges) * 2, np.int64); me.edges.foreach_get("vertices", ed); ed = ed.reshape(-1, 2)
+        deg = np.bincount(ed.ravel(), minlength=n).astype(float)
+
+        def neigh_mean(x):
+            acc = np.zeros_like(x)
+            np.add.at(acc, ed[:, 0], x[ed[:, 1]])
+            np.add.at(acc, ed[:, 1], x[ed[:, 0]])
+            return acc / np.maximum(deg, 1)[:, None]
+
+        def nearest(pts):
+            nb, nn = np.zeros_like(pts), np.zeros_like(pts)
+            for i, p in enumerate(pts):
+                b, bn, _, _ = B["bvh"].find_nearest(Vector(p))
+                nb[i], nn[i] = b, bn
+            return nb, nn
+
+        # boundary vertices (hems, collar, cuffs) keep their place in the relax step
+        bnd = np.zeros(n, bool)
+        bm = bmesh.new(); bm.from_mesh(me)
+        for v in bm.verts:
+            if v.is_boundary:
+                bnd[v.index] = True
+        bm.free()
+
+        nb, nn = nearest(co)
+        off = co - nb
+        gap = (off * nn).sum(1)
+        g0 = 0.004
+        k = np.interp(np.clip(nn[:, 2], 0, 1), [0, 1], [0.55, 0.2])     # tops of shoulders: rests on the body
+        k = 1 - (1 - k) * min(max(amount, 0.0), 1.5)
+        want = np.where((gap > g0) & (gap < 0.08), g0 + (gap - g0) * k, gap)
+        disp = nn * (want - gap)[:, None]
+        for _ in range(12):                    # spread the change smoothly (no dents along the boundary)
+            disp = 0.5 * disp + 0.5 * neigh_mean(disp)
+        co = co + disp
+        for _ in range(3):                     # gentle relax (a corrective smooth of the fitted lumps)
+            sm = 0.75 * co + 0.25 * neigh_mean(co)
+            co = np.where(bnd[:, None], co, sm)
+        nb, nn = nearest(co)                   # stay outside the skin
+        gap = ((co - nb) * nn).sum(1)
+        push = np.where((gap < 0.002) & (gap > -0.03), 0.002 - gap, 0.0)
+        co = co + nn * push[:, None]
+        me.vertices.foreach_set("co", co.ravel())
+        me.update()
+        if sim_frames > 0:
+            cloth_settle(o, body, B, sim_frames)
+        cloth_wrinkles(o, bnd, ed, amount)
+        moved = np.linalg.norm(disp, axis=1)
+        done.append(f"{o.name} (mean pull {moved.mean() * 1000:.1f} mm, max {moved.max() * 1000:.0f} mm)")
+    log(f"cloth detail: {', '.join(done) or 'no clothes'} ({time.time() - t0:.1f}s)")
+
+
+def cloth_settle(o, body, B, frames):
+    """Short cloth simulation so loose parts (sleeves, hem) hang and fold under gravity: the parts that
+    touch the body (collar, shoulders, waist) and everything below the hips are pinned, the frozen body
+    is the collider. The result is frozen back into the mesh."""
+    import numpy as np
+    dg = bpy.context.evaluated_depsgraph_get()
+    masks = [m for m in body.modifiers if m.type == "MASK" and m.name.startswith("Delete.") and m.show_viewport]
+    for m in masks:
+        m.show_viewport = False
+    cme = bpy.data.meshes.new_from_object(body.evaluated_get(bpy.context.evaluated_depsgraph_get()))
+    for m in masks:
+        m.show_viewport = True
+    cme.transform(body.matrix_world)
+    col = bpy.data.objects.new("Cloth collider", cme)
+    bpy.context.scene.collection.objects.link(col)
+    col.hide_render = True
+    col.modifiers.new("Collision", "COLLISION")
+    col.collision.thickness_outer = 0.003
+    hips = B["co"][:, 2].min() + 0.53 * (B["co"][:, 2].max() - B["co"][:, 2].min())
+    vg = o.vertex_groups.new(name="cloth pin")
+    for v in o.data.vertices:
+        b, bn, _, _ = B["bvh"].find_nearest(v.co)
+        g = (v.co - b).dot(bn)
+        w = 1.0 if v.co.z < hips else max(0.0, min(1.0, (0.012 - g) / 0.008))
+        if w > 0:
+            vg.add([v.index], w, "REPLACE")
+    cm = o.modifiers.new("Cloth", "CLOTH")
+    st = cm.settings
+    st.quality = 5
+    st.mass = 0.15                              # light cotton jersey
+    st.tension_stiffness = st.compression_stiffness = 10
+    st.bending_stiffness = 0.05
+    st.vertex_group_mass = "cloth pin"
+    st.pin_stiffness = 1.0
+    cm.collision_settings.use_self_collision = False
+    cm.collision_settings.distance_min = 0.003
+    sc = bpy.context.scene
+    f0 = sc.frame_current
+    cm.point_cache.frame_start = f0
+    cm.point_cache.frame_end = f0 + frames
+    for f in range(f0, f0 + frames + 1):
+        sc.frame_set(f)
+    dg = bpy.context.evaluated_depsgraph_get()
+    me = bpy.data.meshes.new_from_object(o.evaluated_get(dg), preserve_all_data_layers=True, depsgraph=dg)
+    o.modifiers.clear()
+    o.data = me
+    bpy.data.objects.remove(col, do_unlink=True)
+    sc.frame_set(f0)
+
+
+def cloth_wrinkles(o, bnd, ed, amount):
+    """Soft geometric folds: a render subdivision, then a displacement by large cloud noise stretched along
+    the body (folds run mostly up and down), faded out at the hems and collar so nothing pokes through."""
+    import numpy as np
+    w = np.where(bnd, 0.0, 1.0)
+    for _ in range(3):                          # fade over the first few rows from each edge
+        acc = np.zeros(len(w)); cnt = np.zeros(len(w))
+        np.add.at(acc, ed[:, 0], w[ed[:, 1]]); np.add.at(acc, ed[:, 1], w[ed[:, 0]])
+        np.add.at(cnt, ed[:, 0], 1); np.add.at(cnt, ed[:, 1], 1)
+        w = np.minimum(w, acc / np.maximum(cnt, 1) + 0.2)
+    vg = o.vertex_groups.new(name="wrinkles")
+    for i, x in enumerate(w):
+        if x > 0:
+            vg.add([i], float(x), "REPLACE")
+    sub = o.modifiers.new("Wrinkle subdiv", "SUBSURF")
+    sub.levels = 0
+    sub.render_levels = 2
+    tx = bpy.data.textures.new("Cloth folds", "CLOUDS")
+    tx.noise_scale = 0.03
+    tx.noise_depth = 1
+    tx.noise_basis = "BLENDER_ORIGINAL"
+    axes = bpy.data.objects.new("Cloth folds axes", None)   # stretches the noise vertically
+    bpy.context.scene.collection.objects.link(axes)
+    axes.scale = (1.0, 1.0, 4.0)
+    dp = o.modifiers.new("Wrinkles", "DISPLACE")
+    dp.texture = tx
+    dp.texture_coords = "OBJECT"
+    dp.texture_coords_object = axes
+    dp.strength = 0.008 * amount
+    dp.mid_level = 0.5
+    dp.vertex_group = "wrinkles"
+
+
+def cloth_relief(m):
+    """Fabric surface for --cloth-detail: a fine knit/weave bump plus soft, mostly vertical wrinkles,
+    layered over the clothes' own normal map."""
+    nt, b = nodes_of(m)
+    prev = None
+    for lk in list(nt.links):
+        if lk.to_socket == b.inputs["Normal"]:
+            prev = lk.from_socket
+            nt.links.remove(lk)
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    # knit: fine noise stretched along the wales (vertical loops), about 1 mm
+    mp = nt.nodes.new("ShaderNodeMapping")
+    mp.inputs["Scale"].default_value = (1.0, 1.0, 0.45)
+    nt.links.new(tc.outputs["Object"], mp.inputs["Vector"])
+    knit = nt.nodes.new("ShaderNodeTexNoise")
+    knit.inputs["Scale"].default_value = 1400.0
+    knit.inputs["Detail"].default_value = 1.0
+    nt.links.new(mp.outputs["Vector"], knit.inputs["Vector"])
+    # wrinkles: low-frequency distorted noise, longer vertically
+    mp2 = nt.nodes.new("ShaderNodeMapping")
+    mp2.inputs["Scale"].default_value = (1.0, 1.0, 0.3)
+    nt.links.new(tc.outputs["Object"], mp2.inputs["Vector"])
+    wr = nt.nodes.new("ShaderNodeTexNoise")
+    wr.inputs["Scale"].default_value = 22.0
+    wr.inputs["Detail"].default_value = 2.0
+    wr.inputs["Distortion"].default_value = 0.6
+    nt.links.new(mp2.outputs["Vector"], wr.inputs["Vector"])
+    b1 = nt.nodes.new("ShaderNodeBump")
+    b1.inputs["Strength"].default_value = 0.5
+    b1.inputs["Distance"].default_value = 0.004
+    nt.links.new(wr.outputs["Fac"], b1.inputs["Height"])
+    if prev is not None:
+        nt.links.new(prev, b1.inputs["Normal"])
+    b2 = nt.nodes.new("ShaderNodeBump")
+    b2.inputs["Strength"].default_value = 0.25
+    b2.inputs["Distance"].default_value = 0.0003
+    nt.links.new(knit.outputs["Fac"], b2.inputs["Height"])
+    nt.links.new(b1.outputs["Normal"], b2.inputs["Normal"])
+    nt.links.new(b2.outputs["Normal"], b.inputs["Normal"])
+
+
 # ---------------------------------------------------------------- scene: world, lights, backdrop
 def world(path, strength, rotate):
     w = bpy.data.worlds.new("Studio")
@@ -988,6 +1204,10 @@ def main():
                 md.levels = 0
                 md.render_levels = a.subdiv
                 md.quality = 2
+    if a.cloth_detail:
+        cloth_detail(meshes, body, a.cloth_detail, a.cloth_sim)
+        for m in {o.active_material for o in meshes if mat_kind(o) == "clothes"}:
+            cloth_relief(m)
     W, H = render_settings(a)
     b = bounds(meshes, arm)
     cam, cam_pos = camera(b, a.shot, a.lens, a.angle, (W, H), a.dof, a.fstop)
