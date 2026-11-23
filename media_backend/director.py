@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field, ValidationError
 from . import storage
 from .config import get_settings
 from .ops import REGISTRY, OpError, OpResult, _guarded, operation, run_operation
-from .scene import Beat, SceneParams, list_stages, render_stage, stage_moves, stages_dir
+from . import scene as _scene  # noqa: F401  (attributes used lazily: scene imports ops, which imports this module)
 from .voices import VOICES
 
 MOODS = ["none", "calm", "upbeat", "tense", "sad", "epic", "playful", "lofi"]
@@ -52,8 +52,8 @@ def _json(text: str) -> Any:
 
 
 def _plan_prompt(stage: str) -> str:
-    moves = stage_moves(stage)
-    d = stages_dir() / stage
+    moves = _scene.stage_moves(stage)
+    d = _scene.stages_dir() / stage
     models = sorted(f.stem for f in (d / "models").glob("*.json") if f.stem != "light") if (d / "models").exists() else ["teen"]
     sets = sorted(x.name for x in (d / "sets").iterdir() if (x / "set.json").exists()) if (d / "sets").exists() else []
     return f"""You direct short videos with a 3D character (stage "{stage}"). Turn the request into a shot plan.
@@ -71,13 +71,13 @@ def _plan(request: str, stage: str, feedback: str | None = None, previous: dict 
     if previous:
         msg += f"\n\nYour previous plan:\n{json.dumps(previous)}\n\nWhat was wrong with the result:\n{feedback}\n\nWrite a corrected plan."
     plan = _json(_ask(_plan_prompt(stage), msg))
-    moves = set(stage_moves(stage))
+    moves = set(_scene.stage_moves(stage))
     beats = []
     for b in plan.get("beats", [])[:40]:
         if b.get("move") and b["move"] not in moves:
             b.pop("move")
         try:
-            beats.append(Beat(**{k: v for k, v in b.items() if k in Beat.model_fields}).model_dump(exclude_none=True))
+            beats.append(_scene.Beat(**{k: v for k, v in b.items() if k in _scene.Beat.model_fields}).model_dump(exclude_none=True))
         except ValidationError:
             continue
     if not beats:
@@ -94,7 +94,7 @@ def _plan(request: str, stage: str, feedback: str | None = None, previous: dict 
         except ValidationError:
             continue
     plan["cast"] = cast
-    sdir = stages_dir() / stage / "sets" / str(plan.get("set"))
+    sdir = _scene.stages_dir() / stage / "sets" / str(plan.get("set"))
     plan["set"] = plan.get("set") if plan.get("set") and (sdir / "set.json").exists() else None
     plan["look"] = plan.get("look") if plan.get("look") in ("film", "warm", "cool", "noir", "vintage", "bleach", "none") else "film"
     return plan
@@ -123,12 +123,12 @@ class DirectParams(BaseModel):
 
 @operation("direct_scene", DirectParams, "Make a short video from a plain-words request: Claude plans the shots (lines, moves, camera, music), Builder renders it with scene_video, then Claude watches the result and fixes it if needed. Long: start with wait=false.")
 def direct_scene(p: DirectParams) -> OpResult:
-    if p.stage not in list_stages():
-        raise OpError(f"no stage called {p.stage!r} (have: {', '.join(list_stages()) or 'none'})")
+    if p.stage not in _scene.list_stages():
+        raise OpError(f"no stage called {p.stage!r} (have: {', '.join(_scene.list_stages()) or 'none'})")
     plan = _plan(p.request, p.stage)
     history = []
     for attempt in range(p.max_revisions + 1):
-        params = SceneParams(beats=plan["beats"], stage=p.stage, voice=plan["voice"], music=plan["music"], look=plan["look"],
+        params = _scene.SceneParams(beats=plan["beats"], stage=p.stage, voice=plan["voice"], music=plan["music"], look=plan["look"],
                              cast=plan["cast"], set=plan["set"], resolution=p.resolution, fps=p.fps)
         res = run_operation("scene_video", params)
         vid = res.outputs[0].id
@@ -167,7 +167,7 @@ def make_anything(p: AnythingParams) -> OpResult:
     routes = {k: v for k, v in ROUTES.items() if k == "craft" or k in REGISTRY}
     schemas = {k: REGISTRY[k].params.model_json_schema() for k in routes if k in REGISTRY}
     system = ("Pick the one tool that best makes what is asked, and its parameters (follow each tool's JSON schema; leave out what you don't need). "
-              f"Tools: {json.dumps(routes)}\nSchemas: {json.dumps(schemas)}\nStages (characters for video): {list_stages()}\n"
+              f"Tools: {json.dumps(routes)}\nSchemas: {json.dumps(schemas)}\nStages (characters for video): {_scene.list_stages()}\n"
               f"Files given: {p.file_ids}\n"
               'Answer only JSON: {"tool": str, "params": {...}, "why": str}')
     choice = _json(_ask(system, p.request, 1500))
@@ -199,7 +199,7 @@ class StyleParams(BaseModel):
 
 @operation("style_check", StyleParams, "Check a character still looks the way it was approved: renders fixed views (face, full body, three-quarter) and compares each with the approved pictures, with heat maps of any change. approve=true saves the current look as approved.")
 def style_check(p: StyleParams) -> OpResult:
-    stage = stages_dir() / p.stage
+    stage = _scene.stages_dir() / p.stage
     if not (stage / "index.html").exists():
         raise OpError(f"no stage called {p.stage!r}")
     adir = approved_dir(p.stage)
@@ -211,7 +211,7 @@ def style_check(p: StyleParams) -> OpResult:
         for view, beats in VIEWS.items():
             vw = work / view
             vw.mkdir()
-            frames, _ = render_stage(stage, {"width": 960, "height": 540, "fps": 4, "duration": 1.5, "beats": beats}, vw)
+            frames, _ = _scene.render_stage(stage, {"width": 960, "height": 540, "fps": 4, "duration": 1.5, "beats": beats}, vw)
             last = sorted(frames.glob("*.png"))[-1]
             if p.approve:
                 adir.mkdir(parents=True, exist_ok=True)

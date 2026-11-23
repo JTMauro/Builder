@@ -22,3 +22,5 @@ Python 3.10+ / FastAPI / ffmpeg. Package in `media_backend/`, tests in `tests/` 
   (`MEDIA_BACKEND_MCP_MEDIA_ONLY=1`), so a build can't start builds or call Rivet.
 - Engine changes are listed in `engine/BUILDER.md`; keep that list current. Tests use the stand-in
   engine `tests/fixtures/fake_engine.py`.
+
+- Studio work (characters, scenes, sound): read `studio/PLAYBOOK.md` and `studio/BIBLE.md` first, and add lessons to the playbook.

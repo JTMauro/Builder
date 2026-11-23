@@ -62,6 +62,7 @@ class Beat(BaseModel):
     actor: str | None = Field(None, description="Which cast member (default: the first)")
     look: str | None = Field(None, description="Where the actor looks: 'camera' or another cast id")
     shot: Shot | None = Field(None, description="Change the camera shot (studio stages)")
+    prop: dict | str | None = Field(None, description='Hold a prop: {"prop": "football", "hand": "right"|"left"}, or "none" to put it away (studio stages; props in the stage\'s props folder)')
     say: str | None = Field(None, max_length=600, description="A line to speak")
     voice: str | None = Field(None, description="Kokoro voice for this line (default: the scene's voice)")
     move: str | None = Field(None, max_length=40, description="A move or gesture: idle, walk, run, wave, point, thumbs up, agree (nod), headShake, arms crossed, jump, sit, dance, shrug, bow, stretch, kick, pickup, hello, laugh, or any extra CMU move on the stage (explain, sneak, happy walk, moonwalk, ...)")
@@ -77,7 +78,7 @@ class SceneParams(BaseModel):
     beats: list[Beat] = Field(min_length=1, max_length=60)
     stage: str = Field("teen", description="Stage (character) name; see the stages folder")
     cast: list[CastMember] = Field(default_factory=list, max_length=6, description="Several characters (default: the stage's one)")
-    set: str | None = Field(None, description="A place on the stage: park, living_room, street (see the stage's sets folder); default the grey studio")
+    set: str | None = Field(None, description="A place on the stage: park, living_room, street, beach, gym, school, cafe, stadium, snow (see the stage's sets folder); default the grey studio")
     quality: Literal["film", "fast"] = Field("film", description="fast skips ambient occlusion (quicker renders)")
     voice: Literal[tuple(VOICES)] = Field("am_puck", description="Default voice")  # type: ignore[valid-type]
     resolution: Literal["640x360", "1280x720", "1920x1080", "2560x1440", "3840x2160"] = "1280x720"
@@ -157,7 +158,7 @@ def scene_video(p: SceneParams) -> OpResult:
     for i, b in enumerate(p.beats):
         t = b.at if b.at is not None else cursor
         beat = {"t": round(t, 3)}
-        for k in ("move", "view", "face", "actor", "look"):
+        for k in ("move", "view", "face", "actor", "look", "prop"):
             if getattr(b, k) is not None:
                 beat[k] = getattr(b, k)
         if b.shot:
@@ -193,7 +194,7 @@ def scene_video(p: SceneParams) -> OpResult:
         scene = {"width": w, "height": h, "fps": p.fps, "duration": duration, "beats": beats,
                  "lines": [{k: v for k, v in ln.items() if k != "t"} for ln in lines]}
         studio = (stage / "studio.html").exists()
-        if p.cast or p.set or any(b.shot for b in p.beats):
+        if p.cast or p.set or any(b.shot or b.prop for b in p.beats):
             if not studio:
                 raise OpError("this stage has no studio page (several characters, sets and shots need studio.html; rebuild it with make_stage.py)")
             if p.set and not (stage / "sets" / p.set / "set.json").exists():
