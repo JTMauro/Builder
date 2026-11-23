@@ -92,3 +92,21 @@ def test_vit_key_rename():
                    "image_tokenizer.model.layers.3.mlp.fc2.weight": 3, "image_tokenizer.model.layers.3.mlp.fc1.weight": 4,
                    "image_tokenizer.model.layers.3.layernorm_before.weight": 5, "decoder.x": 6}
     assert w.vit_keys(old, {"image_tokenizer.model.encoder.layer.0.attention.attention.query.weight"}) is old   # transformers 4: as is
+
+
+def test_coarse_to_fine_grid_matches_full_grid():
+    torch = pytest.importorskip("torch")
+    spec = importlib.util.spec_from_file_location("triposr_worker", TOOL)
+    w = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(w)
+
+    def dens(p):   # a blob and a thin rod, like a teapot's handle
+        c = p - 0.5
+        rod = ((c[:, 0] ** 2 + c[:, 1] ** 2).sqrt() < 0.02) & (c[:, 2].abs() < 0.45)
+        return 50 * torch.exp(-3 * (c.norm(dim=-1) / 0.25) ** 2) + 60 * rod.float()
+
+    n = 160
+    vol, queried = w.dense_volume(dens, n, 25.0)
+    lin = torch.linspace(0, 1, n)
+    full = dens(torch.stack(torch.meshgrid(lin, lin, lin, indexing="ij"), -1).reshape(-1, 3)).reshape(n, n, n).numpy()
+    assert ((vol > 25) == (full > 25)).all() and queried < n ** 3 / 4

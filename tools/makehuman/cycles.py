@@ -592,7 +592,7 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
     step, ramp, lmax = 0.004, 0.015, length_cm / 100.0
     NP = 12
 
-    def grow(root, nrm, layer):
+    def grow(root, nrm, layer, turn):
         p = Vector(root); n = Vector(nrm)
         s, sn, fi, _ = C["bvh"].find_nearest(p)
         d = (n * 0.7 + flow(p, sn)).normalized()
@@ -616,7 +616,9 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
             dn = (q - p)
             if dn.length < 1e-6:
                 break
-            d = (dn.normalized() * 0.55 + flow(q, sn) * 0.45).normalized()
+            f = flow(q, sn)
+            f = Matrix.Rotation(turn, 3, sn) @ f              # each lock combed a little differently
+            d = (dn.normalized() * 0.55 + f * 0.45).normalized()
             L += dn.length
             pts.append(q.copy()); p = q
         if len(pts) < 3:
@@ -629,20 +631,21 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
     ng = int(max(200, min(6000, scalp_cm2 * 5)))
     groots, gn = sample(ng)
     layers = 1.0 - 0.8 * rng.random(ng) ** 2              # most guides near the card surface (visible)
+    turns = rng.normal(0, math.radians(9), ng)
     G, R = [], []
     for i in range(ng):
-        g = grow(groots[i], gn[i], layers[i])
+        g = grow(groots[i], gn[i], layers[i], turns[i])
         if g is not None:
             G.append(g); R.append(groots[i])
     if not G:
         log("strand hair: no guide could grow, skipped")
         return None
     G, R = np.array(G), np.array(R)
-    # a gentle wave per lock (about 1.5 mm, growing toward the tip) so locks are not ruler-straight
+    # a gentle wave per lock (about 2 mm, growing toward the tip) so locks are not ruler-straight
     S = np.linspace(0, 1, NP)
     ph = rng.random((len(G), 1, 1)) * 6.3
-    wv = rng.normal(0, 0.0011, (len(G), 1, 3))
-    G[:, 1:] += (wv * np.sin(4.0 * S[None, :, None] + ph) * S[None, :, None])[:, 1:]
+    wv = rng.normal(0, 0.0016, (len(G), 1, 3))
+    G[:, 1:] += (wv * np.sin(3.0 * S[None, :, None] + ph) * S[None, :, None])[:, 1:]
     strand_hair.guides = G                                   # for debugging / tests
     log(f"strand hair: scalp {scalp_cm2:.0f} cm2, {len(G)} guides ({time.time() - t0:.1f}s)")
 
@@ -663,7 +666,7 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
     wts /= wts.sum(1, keepdims=True)
     shape = (G[idx] * wts[:, :, None, None]).sum(1)                 # (nc, NP, 3)
     base = shape[:, :1]
-    clump = 0.35 + 0.3 * rng.random((nc, 1, 1))
+    clump = 0.5 + 0.35 * rng.random((nc, 1, 1))
     near = G[idx[:, 0]]
     shape = shape + (near - shape) * (clump * S[None, :, None] ** 1.5)
     shape = shape + (croots[:, None] - base) * (1 - 0.6 * S[None, :, None])
@@ -673,8 +676,8 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
     i0 = np.minimum(np.floor(x).astype(int), NP - 2); fr = (x - i0)[:, :, None]
     ar = np.arange(nc)[:, None]
     shape = shape[ar, i0] * (1 - fr) + shape[ar, i0 + 1] * fr
-    # frizz: smooth random offsets growing toward the tip (about 1 mm)
-    fz = rng.normal(0, 0.0007, (nc, 3, 3))
+    # frizz: smooth random offsets growing toward the tip (1-2 mm)
+    fz = rng.normal(0, 0.001, (nc, 3, 3))
     tt = S[None, :, None]
     shape += (fz[:, 0, None] * np.sin(3.1 * tt) + fz[:, 1, None] * np.sin(6.3 * tt + 1)) * tt
     # stay outside the scalp and under the card surface (no strand pokes out as a spike); a strand that
@@ -721,7 +724,7 @@ def strand_hair(body, card, arm, density, length_cm, melanin, seed=7):
     cv.add_curves([NP] * nc)
     cv.attributes["position"].data.foreach_set("vector", shape.astype(np.float32).ravel())
     rad = cv.attributes.get("radius") or cv.attributes.new("radius", "FLOAT", "POINT")
-    r = np.tile(0.000055 * (1 - 0.65 * S ** 2), nc).astype(np.float32)
+    r = np.tile(0.000045 * (1 - 0.7 * S ** 2), nc).astype(np.float32)
     rad.data.foreach_set("value", r)
     cl = cv.attributes.new("clump", "FLOAT", "CURVE")        # one random value per clump (guide)
     cl.data.foreach_set("value", rng.random(len(G))[clump_id].astype(np.float32))
