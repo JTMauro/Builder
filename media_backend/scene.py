@@ -65,7 +65,8 @@ class Beat(BaseModel):
     prop: dict | str | None = Field(None, description='Hold a prop: {"prop": "football", "hand": "right"|"left"}, or "none" to put it away (studio stages; props in the stage\'s props folder)')
     say: str | None = Field(None, max_length=600, description="A line to speak")
     voice: str | None = Field(None, description="Kokoro voice for this line (default: the scene's voice)")
-    move: str | None = Field(None, max_length=40, description="A move or gesture: idle, walk, run, wave, point, thumbs up, agree (nod), headShake, arms crossed, jump, sit, dance, shrug, bow, stretch, kick, pickup, hello, laugh, or any extra CMU move on the stage (explain, sneak, happy walk, moonwalk, ...)")
+    move: str | None = Field(None, max_length=80, description="A move or gesture: idle, walk, run, wave, point, thumbs up, agree (nod), headShake, arms crossed, jump, sit, dance, shrug, bow, stretch, kick, pickup, hello, laugh, any extra CMU move on the stage (explain, sneak, happy walk, moonwalk, ...), or any of the ~2,400 CMU moves by id or words (find_moves; fetched on demand). With `on`: sit, lean or open")
+    on: str | None = Field(None, max_length=64, description="A set prop to use with move sit / lean / open (e.g. 'painted_wooden_bench', 'door'; a prop id on the set, optionally with #n for the n-th one): the actor walks there, then sits on the seat facing out (and stays seated until another move), leans on it, or opens it")
     view: Literal["body", "face"] | None = Field(None, description="Camera: full body or close-up on the face")
     walk_to: list[float] | None = Field(None, min_length=2, max_length=2, description="[x, z] metres on the floor to walk (or run) to")
     run: bool = False
@@ -145,6 +146,88 @@ def stage_moves(stage: str) -> list[str]:
     return base + [m for m in extra if m not in base]
 
 
+def _text_cues(text: str, dur: float) -> list[list]:
+    """Mouth shapes from the letters, spread over the line's time (no audio: comics, previews)."""
+    def shape(c: str) -> str:
+        return ("A" if c in "mbp" else "G" if c in "fv" else "F" if c in "ouw" else "D" if c == "a" else "C" if c in "ei"
+                else "H" if c == "l" else "X" if c in " .,!?" else "B")
+    chars, cues = text.lower(), []
+    per = dur / max(1, len(chars))
+    for i, c in enumerate(chars):
+        v = shape(c)
+        if not cues or cues[-1][1] != v:
+            cues.append([round(i * per, 3), v])
+    return cues
+
+
+def build_timeline(p: SceneParams, voiced: bool = True) -> tuple[list[dict], list[dict], list[tuple[str, float]], list[str], float]:
+    """Beats -> (timed beats, lines, voice tracks [(file id, t)], files made, duration). voiced=False skips the voices
+    (each line's length is estimated from its text and the mouth follows the letters), for stills and comics."""
+    beats, lines, voice_tracks, made = [], [], [], []
+    cursor, end = 0.4, 0.0
+    for i, b in enumerate(p.beats):
+        t = b.at if b.at is not None else cursor
+        beat = {"t": round(t, 3)}
+        for k in ("move", "view", "face", "actor", "look", "prop", "on"):
+            if getattr(b, k) is not None:
+                beat[k] = getattr(b, k)
+        if b.shot:
+            beat["shot"] = b.shot.model_dump(exclude_none=True)
+        if b.walk_to:
+            beat["walkTo"], beat["run"] = b.walk_to, b.run
+        dur = b.hold if (b.move or b.walk_to or b.on) else 0.3
+        if b.walk_to:
+            prev = next((x["walkTo"] for x in reversed(beats) if "walkTo" in x and x.get("actor") == b.actor), [0, 0])
+            dur = max(dur, math.dist(prev, b.walk_to) / SPEED["run" if b.run else "walk"] + 0.4)
+        if b.say:
+            key = f"l{i}"
+            if voiced:
+                cast_voice = next((c.voice for c in p.cast if c.id == b.actor and c.voice), None)
+                sp = run_operation("speak", {"text": b.say, "voice": b.voice or cast_voice or p.voice, "name": f"scene_{key}"}).outputs[0].id
+                cues = json.loads(storage.path_of(run_operation("lipsync", {"file_id": sp}).outputs[0].id).read_text(encoding="utf-8"))
+                polished = run_operation("voice_polish", {"file_id": sp, "style": "podcast"}).outputs[0].id
+                roomed = run_operation("room_reverb", {"file_id": polished, "room": p.room}).outputs[0].id
+                made += [sp, polished, roomed]
+                words = [{"w": x["word"].strip(), "s": round(x["start"], 3), "e": round(x["end"], 3)} for x in cues.get("words", [])]
+                length, mouth = cues["metadata"]["duration"], [[c["start"], c["value"]] for c in cues["mouthCues"]]
+                voice_tracks.append((roomed, t))
+            else:
+                length = max(0.8, len(b.say) * 0.062)
+                words, mouth = [], _text_cues(b.say, length)
+            lines.append({"key": key, "text": b.say, "duration": length, "t": t, "cues": mouth, "words": words})
+            beat["say"] = key
+            dur = max(dur if (b.move or b.walk_to) else 0, length + 0.35)
+        beats.append(beat)
+        cursor = t + dur
+        end = max(end, cursor)
+    return beats, lines, voice_tracks, made, round(end + p.tail, 2)
+
+
+def studio_scene(p: SceneParams, stage: Path, beats: list[dict], lines: list[dict], w: int, h: int, duration: float) -> tuple[dict, dict]:
+    """The scene dict for the stage page (studio.html when the stage has one); fetches moves the stage lacks. Returns (scene, fetched)."""
+    scene = {"width": w, "height": h, "fps": p.fps, "duration": duration, "beats": beats,
+             "lines": [{k: v for k, v in ln.items() if k != "t"} for ln in lines]}
+    studio = (stage / "studio.html").exists()
+    if p.cast or p.set or any(b.shot or b.prop or b.on for b in p.beats):
+        if not studio:
+            raise OpError("this stage has no studio page (several characters, sets and shots need studio.html; rebuild it with make_stage.py)")
+        if p.set and not (stage / "sets" / p.set / "set.json").exists():
+            have = sorted(d.name for d in (stage / "sets").iterdir()) if (stage / "sets").exists() else []
+            raise OpError(f"no set called {p.set!r} on this stage (have: {', '.join(have) or 'none'}; add one with add_set)")
+    fetched: dict = {}
+    if studio:
+        # moves the stage doesn't have yet: any CMU id or words, fetched into the stage (stage_tools.find_moves)
+        known = set(stage_moves(p.stage)) | {"lean", "open"}
+        missing = [b.move for b in p.beats if b.move and b.move not in known]
+        if missing:
+            from .stage_tools import ensure_moves
+
+            fetched = ensure_moves(p.stage, missing)
+        cast = [c.model_dump() for c in p.cast] or [{"id": "a", "model": "teen", "at": [0, 0], "face": 0}]
+        scene.update({"page": "studio.html", "cast": cast, "set": p.set, "quality": p.quality})
+    return scene, fetched
+
+
 @operation("scene_video", SceneParams, "Make a finished video of a 3D character acting out a scene: give beats (lines to say, moves, camera, walking); Builder voices each line, lip-syncs it, renders the stage frame by frame, adds footsteps, optional original music, captions and a film look. Long: start with wait=false.")
 def scene_video(p: SceneParams) -> OpResult:
     from .characters import resolve_cast   # library characters bring their own voices
@@ -155,56 +238,12 @@ def scene_video(p: SceneParams) -> OpResult:
     w, h = (int(x) for x in p.resolution.split("x"))
 
     # 1. voices and the timeline
-    beats, lines, voice_tracks, made = [], [], [], []
-    cursor, end = 0.4, 0.0
-    for i, b in enumerate(p.beats):
-        t = b.at if b.at is not None else cursor
-        beat = {"t": round(t, 3)}
-        for k in ("move", "view", "face", "actor", "look", "prop"):
-            if getattr(b, k) is not None:
-                beat[k] = getattr(b, k)
-        if b.shot:
-            beat["shot"] = b.shot.model_dump(exclude_none=True)
-        if b.walk_to:
-            beat["walkTo"], beat["run"] = b.walk_to, b.run
-        dur = b.hold if (b.move or b.walk_to) else 0.3
-        if b.walk_to:
-            prev = next((x["walkTo"] for x in reversed(beats) if "walkTo" in x), [0, 0])
-            dur = max(dur, math.dist(prev, b.walk_to) / SPEED["run" if b.run else "walk"] + 0.4)
-        if b.say:
-            key = f"l{i}"
-            cast_voice = next((c.voice for c in p.cast if c.id == b.actor and c.voice), None)
-            sp = run_operation("speak", {"text": b.say, "voice": b.voice or cast_voice or p.voice, "name": f"scene_{key}"}).outputs[0].id
-            cues = json.loads(storage.path_of(run_operation("lipsync", {"file_id": sp}).outputs[0].id).read_text(encoding="utf-8"))
-            polished = run_operation("voice_polish", {"file_id": sp, "style": "podcast"}).outputs[0].id
-            roomed = run_operation("room_reverb", {"file_id": polished, "room": p.room}).outputs[0].id
-            made += [sp, polished, roomed]
-            words = [{"w": x["word"].strip(), "s": round(x["start"], 3), "e": round(x["end"], 3)} for x in cues.get("words", [])]
-            lines.append({"key": key, "text": b.say, "duration": cues["metadata"]["duration"], "t": t,
-                          "cues": [[c["start"], c["value"]] for c in cues["mouthCues"]], "words": words})
-            beat["say"] = key
-            voice_tracks.append((roomed, t))
-            dur = max(dur if (b.move or b.walk_to) else 0, cues["metadata"]["duration"] + 0.35)
-        beats.append(beat)
-        cursor = t + dur
-        end = max(end, cursor)
-    duration = round(end + p.tail, 2)
+    beats, lines, voice_tracks, made, duration = build_timeline(p)
 
     work = Path(tempfile.mkdtemp(prefix="scene-"))
     try:
         # 2. frames
-        scene = {"width": w, "height": h, "fps": p.fps, "duration": duration, "beats": beats,
-                 "lines": [{k: v for k, v in ln.items() if k != "t"} for ln in lines]}
-        studio = (stage / "studio.html").exists()
-        if p.cast or p.set or any(b.shot or b.prop for b in p.beats):
-            if not studio:
-                raise OpError("this stage has no studio page (several characters, sets and shots need studio.html; rebuild it with make_stage.py)")
-            if p.set and not (stage / "sets" / p.set / "set.json").exists():
-                have = sorted(d.name for d in (stage / "sets").iterdir()) if (stage / "sets").exists() else []
-                raise OpError(f"no set called {p.set!r} on this stage (have: {', '.join(have) or 'none'}; add one with add_set.py)")
-        if studio:
-            cast = [c.model_dump() for c in p.cast] or [{"id": "a", "model": "teen", "at": [0, 0], "face": 0}]
-            scene.update({"page": "studio.html", "cast": cast, "set": p.set, "quality": p.quality})
+        scene, fetched = studio_scene(p, stage, beats, lines, w, h, duration)
         frames, events = render_stage(stage, scene, work)
 
         # 3. sound: voices at their times, footsteps at the feet's contact times, music under it all
@@ -251,6 +290,7 @@ def scene_video(p: SceneParams) -> OpResult:
         n_frames = len(list(frames.glob("*.png")))
         return _guarded("scene_video", made, f"scene_{p.stage}_{w}x{h}.mp4", lambda out: _ffmpeg(*args, str(out)),
                         data={"duration_s": duration, "frames": n_frames, "lines": len(lines), "footsteps": len(steps),
-                              "timeline": beats, "stage": p.stage})
+                              "timeline": beats, "stage": p.stage, "fetched_moves": fetched,
+                              "heads": [e for e in events if "heads" in e]})
     finally:
         shutil.rmtree(work, ignore_errors=True)

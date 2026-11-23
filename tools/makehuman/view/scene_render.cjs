@@ -2,7 +2,8 @@
 //
 //   node scene_render.cjs STAGE_DIR scene.json OUT_DIR
 //
-// scene.json: { width, height, fps, duration, beats: [...], lines: [...] }  (see media_backend/scene.py)
+// scene.json: { width, height, fps, duration, beats: [...], lines: [...], keep?: [frame numbers to save], probe?: [times] }
+// (see media_backend/scene.py; keep and a two-argument window.__step(dt, draw) need studio.html)
 // Writes OUT_DIR/000001.png ... and OUT_DIR/events.json (foot contacts, for footstep sounds).
 // GPU: set SCENE_ANGLE=d3d11 (Windows), metal (macOS) or vulkan; the default is a software renderer
 // that works anywhere but is slow (about 1-2 s per 720p frame).
@@ -36,9 +37,12 @@ const server = http.createServer((req, res) => {
   if (await p.evaluate(() => window.__ready) === "error") throw new Error("stage failed to load: " + (await p.textContent("#status")));
   await p.evaluate(() => window.__prepare());
   const t0 = Date.now();
+  // scene.keep: only these frame numbers (1-based) are drawn and saved (stills, comics); [] simulates without drawing
+  const keep = Array.isArray(scene.keep) ? new Set(scene.keep) : null;
   for (let i = 0; i < N; i++) {
-    const data = await p.evaluate(async dt => { await window.__step(dt); return document.querySelector("#stage canvas").toDataURL("image/png"); }, 1 / FPS);
-    fs.writeFileSync(path.join(out, String(i + 1).padStart(6, "0") + ".png"), Buffer.from(data.split(",")[1], "base64"));
+    const draw = !keep || keep.has(i + 1);
+    const data = await p.evaluate(async ([dt, draw]) => { await window.__step(dt, draw); return draw ? document.querySelector("#stage canvas").toDataURL("image/png") : null; }, [1 / FPS, draw]);
+    if (data) fs.writeFileSync(path.join(out, String(i + 1).padStart(6, "0") + ".png"), Buffer.from(data.split(",")[1], "base64"));
     if (i % FPS === 0) console.log(`frame ${i + 1}/${N} (${((Date.now() - t0) / 1000).toFixed(0)} s)`);
   }
   fs.writeFileSync(path.join(out, "events.json"), JSON.stringify(await p.evaluate(() => window.__events())));

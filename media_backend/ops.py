@@ -790,3 +790,4 @@ from . import film as _film_ops  # noqa: E402,F401  (make_film, dub_scene, dub_v
 from . import review as _review_ops  # noqa: E402,F401  (review_video, describe_audio)
 from . import extras as _extra_ops  # noqa: E402,F401  (separate_stems, remove_background, clean_speech, optimize_model)
 from . import godot as _godot_ops  # noqa: E402,F401  (export_godot)
+from . import senses as _senses_ops  # noqa: E402,F401  (watch_video, caption_audio, quality_score)

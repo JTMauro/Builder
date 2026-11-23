@@ -2,7 +2,9 @@
 
 - asset_search: search Poly Haven (HDRI skies, textures, 3D models; CC0), ambientCG (materials;
   CC0), Openverse (Creative Commons images and sounds; commercial-use licences by default) and,
-  with FREESOUND_API_KEY set, Freesound (sound effects).
+  with FREESOUND_API_KEY set, Freesound (sound effects). Game-asset packs: Kenney and Quaternius (CC0
+  low-poly models, imported one model at a time as GLB) and, with POLY_PIZZA_API_KEY, Poly Pizza
+  (single models, CC0 or CC BY); see asset_packs.py for how each is fetched.
 - asset_import: download one result into the library, with its licence and credit line saved in a
   license.json beside the file.
 - page_references: collect the images on one web page (for mood boards and look references).
@@ -34,7 +36,7 @@ from .ops import OpError, OpResult, _guarded, operation
 
 UA = "Builder-asset-finder/0.3"
 MAX_BYTES = 600 * 1024 * 1024
-SOURCES = ("polyhaven", "ambientcg", "openverse", "freesound", "nasa", "smithsonian", "archive")
+SOURCES = ("polyhaven", "ambientcg", "openverse", "freesound", "nasa", "smithsonian", "archive", "kenney", "quaternius", "polypizza")
 PD = {"license": "Public domain", "license_url": "https://creativecommons.org/publicdomain/mark/1.0/"}
 CC0 = {"license": "CC0 1.0", "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"}
 
@@ -241,12 +243,12 @@ def _archive(q: str, kind: str, limit: int) -> list[dict[str, Any]]:
 class AssetSearchParams(BaseModel):
     query: str = Field(min_length=1, max_length=200, description="What you need, e.g. 'sunset sky', 'brick wall', 'wooden chair', 'rain'")
     kind: Literal["any", "hdri", "texture", "model", "image", "sound", "video"] = Field("any", description="hdri = sky/studio lighting; texture = PBR material; model = 3D model; image = photo/illustration/art; sound = audio/music; video = footage")
-    source: Literal["any", "polyhaven", "ambientcg", "openverse", "freesound", "nasa", "smithsonian", "archive"] = "any"
+    source: Literal["any", "polyhaven", "ambientcg", "openverse", "freesound", "nasa", "smithsonian", "archive", "kenney", "quaternius", "polypizza"] = "any"
     limit: int = Field(12, ge=1, le=40)
     commercial_only: bool = Field(True, description="Only licences that allow commercial use (CC0, CC BY, CC BY-SA)")
 
 
-@operation("asset_search", AssetSearchParams, "Find free, licensed assets for a build: HDRI skies, PBR textures and 3D models (Poly Haven, ambientCG, CC0), Creative Commons images and sounds (Openverse), sound effects (Freesound, with a key), public-domain space images/video (NASA), CC0 museum images and 3D scans (Smithsonian), public-domain music, films and sounds (Internet Archive, incl. Musopen). Returns ids to pass to asset_import, with licence and credit.", read_only=True)
+@operation("asset_search", AssetSearchParams, "Find free, licensed assets for a build: HDRI skies, PBR textures and 3D models (Poly Haven, ambientCG, CC0), Creative Commons images and sounds (Openverse), sound effects (Freesound, with a key), public-domain space images/video (NASA), CC0 museum images and 3D scans (Smithsonian), public-domain music, films and sounds (Internet Archive, incl. Musopen), low-poly game models (Kenney and Quaternius packs, CC0; Poly Pizza with a key). Returns ids to pass to asset_import, with licence and credit.", read_only=True)
 def asset_search(p: AssetSearchParams) -> OpResult:
     results, errors = [], []
     plan = [s for s in SOURCES if p.source in ("any", s)]
@@ -266,9 +268,15 @@ def asset_search(p: AssetSearchParams) -> OpResult:
                 results += _smithsonian(p.query, p.kind, p.limit)
             elif s == "archive":
                 results += _archive(p.query, p.kind, p.limit)
+            elif s in ("kenney", "quaternius", "polypizza"):
+                from . import asset_packs
+
+                results += getattr(asset_packs, f"{s}_search")(p.query, p.kind, p.limit)
         except OpError as e:
             errors.append(f"{s}: {e}")
-    note = "" if os.environ.get("FREESOUND_API_KEY") else "Freesound is off (set FREESOUND_API_KEY, free at freesound.org/apiv2/apply)."
+    off = [n for k, n in (("FREESOUND_API_KEY", "Freesound is off (set FREESOUND_API_KEY, free at freesound.org/apiv2/apply)."),
+                          ("POLY_PIZZA_API_KEY", "Poly Pizza is off (set POLY_PIZZA_API_KEY, free with a poly.pizza account).")) if not os.environ.get(k)]
+    note = " ".join(off)
     return OpResult(data={"results": results[: p.limit * 2], "errors": errors, "note": note})
 
 
@@ -292,15 +300,16 @@ def _ext_from(url: str, default: str) -> str:
 
 
 class AssetImportParams(BaseModel):
-    source: Literal["polyhaven", "ambientcg", "openverse", "freesound", "nasa", "smithsonian", "archive", "url"] = Field(description="Where the asset is from (as asset_search returned it), or url for a direct link")
+    source: Literal["polyhaven", "ambientcg", "openverse", "freesound", "nasa", "smithsonian", "archive", "kenney", "quaternius", "polypizza", "url"] = Field(description="Where the asset is from (as asset_search returned it), or url for a direct link")
     asset_id: str | None = Field(None, max_length=200, description="The result's id (Poly Haven, ambientCG, Openverse, Freesound)")
     url: str | None = Field(None, max_length=2000, description="With source=url: a direct link to an image, sound or video on a public site")
     kind: Literal["hdri", "texture", "model", "image", "sound"] | None = Field(None, description="Poly Haven: which kind the id is (from asset_search)")
     resolution: str = Field("2k", max_length=12, description="Poly Haven: 1k/2k/4k/8k; ambientCG: e.g. 2K-JPG, 4K-PNG")
     license_note: str | None = Field(None, max_length=500, description="With source=url: the licence/credit you found on the page")
+    item: str | None = Field(None, max_length=400, description="Kenney/Quaternius packs: which model(s) to take out of the pack, e.g. 'barrel' or 'sword, shield_round' (each becomes a GLB); leave out to list the pack's models")
 
 
-@operation("asset_import", AssetImportParams, "Download an asset found with asset_search (or a direct link) into Builder's library, with its licence and credit line saved beside it. HDRIs come as .hdr, Poly Haven textures as a zip of PBR maps, models as a zip of glTF + textures.")
+@operation("asset_import", AssetImportParams, "Download an asset found with asset_search (or a direct link) into Builder's library, with its licence and credit line saved beside it. HDRIs come as .hdr, Poly Haven textures as a zip of PBR maps, models as a zip of glTF + textures; Kenney/Quaternius pack models (item=) and Poly Pizza models as one GLB each.")
 def asset_import(p: AssetImportParams) -> OpResult:
     work = Path(tempfile.mkdtemp(prefix="asset-"))
     try:
@@ -334,6 +343,14 @@ def _import(p: AssetImportParams, work: Path) -> OpResult:
         return _register(f, name, lic)
     if not p.asset_id:
         raise OpError("Give asset_id (from asset_search)")
+    if p.source in ("kenney", "quaternius"):
+        from . import asset_packs
+
+        return asset_packs.import_pack_items(p.source, p.asset_id, p.item)
+    if p.source == "polypizza":
+        from . import asset_packs
+
+        return asset_packs.import_polypizza(p.asset_id)
     if p.source == "polyhaven":
         files = _get_json(f"https://api.polyhaven.com/files/{urllib.parse.quote(p.asset_id)}")
         res = p.resolution.lower()

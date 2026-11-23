@@ -17,8 +17,11 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px sy
 // { width, height, fps, duration, set: "park" | null, quality: "film" | "fast",
 //   cast: [{ id, model: "teen", at: [x, z], face: deg }],
 //   lines: [{ key, cues: [[t, shape]], words, duration }],
-//   beats: [{ t, actor?, say?, move?, walkTo?, run?, face?, look?: "camera" | actorId,
-//             shot?: { type: "wide" | "two" | "close" | "medium" | "over", actor?, target?, move?: seconds } }] }
+//   beats: [{ t, actor?, say?, move?, walkTo?, run?, face?, look?: "camera" | actorId, on?: set prop id (with move sit | lean | open),
+//             shot?: { type: "wide" | "two" | "close" | "medium" | "over", actor?, target?, move?: seconds } }],
+//   probe?: [t, ...] times to record each head's screen position (events { t, heads: { id: [x, y] } }, 0..1 from top left) }
+// Set props come from sets/<name>/set.json; a prop's "use" block says what people can do with it (add_set.py USES):
+//   sit { seats: [[x, y, z]], face } · lean { at: [x, z], face, kind: "table" | "wall" } · open { hinge: [x, z], angle, seconds, stand: [x, z], node? }
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
@@ -74,9 +77,9 @@ function fromParams(p) {   // scene_video params -> a timed studio scene (the sa
   let cursor = 0.4, end = 0;
   (p.beats || []).forEach((b, i) => {
     const t = b.at ?? cursor, beat = { t }, actor = b.actor || cast[0].id;
-    for (const k of ["move", "view", "face", "actor", "look", "shot"]) if (b[k] != null && b[k] !== "") beat[k] = b[k];
+    for (const k of ["move", "view", "face", "actor", "look", "shot", "on"]) if (b[k] != null && b[k] !== "") beat[k] = b[k];
     const ps = propSpec(b); if (ps != null && ps !== "") beat.prop = ps;
-    let dur = b.move || b.walk_to ? (b.hold ?? 2.5) : 0.3;
+    let dur = b.move || b.walk_to || b.on ? (b.hold ?? 2.5) : 0.3;
     if (b.walk_to) {
       beat.walkTo = b.walk_to; beat.run = !!b.run; const prev = pos[actor] || [0, 0];
       dur = Math.max(dur, Math.hypot(b.walk_to[0] - prev[0], b.walk_to[1] - prev[1]) / (b.run ? 3.4 : 1.15) + 0.4); pos[actor] = b.walk_to;
@@ -145,6 +148,31 @@ async function loadGltfJson(url) {
 }
 
 // ---------- the set: surroundings + light from an HDRI, props, a floor that only shows shadows
+const setProps = [];   // { id, obj, use, n, pivot, busy: { seatIndex: actorId } }
+function makeDoor(p) {   // a simple door (no download): frame + a panel hinged on its left edge (local x = -width/2)
+  const [w, h] = p.size || [0.9, 2.05], g = new THREE.Group(), wood = new THREE.MeshStandardMaterial({ color: p.color || "#7a5636", roughness: 0.7 });
+  const frameM = new THREE.MeshStandardMaterial({ color: "#d8d2c4", roughness: 0.8 });
+  for (const x of [-w / 2 - 0.05, w / 2 + 0.05]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, h + 0.1, 0.14), frameM); post.position.set(x, (h + 0.1) / 2, 0); g.add(post); }
+  const top = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, 0.1, 0.14), frameM); top.position.set(0, h + 0.05, 0); g.add(top);
+  const panel = new THREE.Group(); panel.name = "door_panel";
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(w - 0.01, h - 0.01, 0.045), wood); slab.position.set(0, h / 2, 0); panel.add(slab);
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.03, 16, 12), new THREE.MeshStandardMaterial({ color: "#c9a95a", metalness: 0.9, roughness: 0.3 }));
+  for (const z of [0.045, -0.045]) { const k = knob.clone(); k.position.set(w / 2 - 0.09, 1.0, z); panel.add(k); }
+  g.add(panel); return g;
+}
+function hingeOf(obj, open) {   // put the moving part (open.node, or the door panel) under a pivot at the hinge
+  const part = obj.getObjectByName(open.node || "door_panel"); if (!part) return null;
+  const pivot = new THREE.Group(); pivot.position.set(open.hinge?.[0] || 0, 0, open.hinge?.[1] || 0);
+  part.parent.add(pivot); pivot.attach(part); return pivot;
+}
+function findProp(name, near) {   // "bench", "painted_wooden_bench", "door#2": the n-th (or the nearest) set prop with that id
+  if (!name) return null; const [id, nth] = String(name).split("#"), low = id.toLowerCase();
+  const hits = setProps.filter(p => p.id.toLowerCase() === low); const list = hits.length ? hits : setProps.filter(p => p.id.toLowerCase().includes(low));
+  if (nth) return list.find(p => p.n === +nth) || list[+nth - 1] || null;
+  return near ? list.sort((a, b) => a.obj.position.distanceTo(near) - b.obj.position.distanceTo(near))[0] || null : list[0] || null;
+}
+const toWorld = (p, x, y, z) => new V(x, y, z).applyMatrix4(p.obj.matrixWorld);
+const propYaw = p => p.obj.rotation.y;
 async function buildSet() {
   const pm = new THREE.PMREMGenerator(r);
   if (S.set) {
@@ -156,9 +184,11 @@ async function buildSet() {
     const catcher = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.ShadowMaterial({ opacity: 0.38 }));
     catcher.rotation.x = -Math.PI / 2; catcher.position.y = 0.002; catcher.receiveShadow = true; scene.add(catcher);
     for (const p of spec.props) {
-      const g = await loader.loadAsync(base + p.file);
-      g.scene.position.set(p.at[0], 0, p.at[1]); g.scene.rotation.y = (p.rot || 0) * Math.PI / 180; g.scene.scale.setScalar(p.scale || 1);
-      g.scene.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } }); scene.add(g.scene);
+      const obj = p.kind === "door" ? makeDoor(p) : (await loader.loadAsync(base + p.file)).scene;
+      obj.position.set(p.at[0], 0, p.at[1]); obj.rotation.y = (p.rot || 0) * Math.PI / 180; obj.scale.setScalar(p.scale || 1);
+      obj.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } }); scene.add(obj); obj.updateMatrixWorld(true);
+      const id = p.id || (p.file || "").split("/")[0], use = p.use || {};
+      setProps.push({ id, obj, use, n: setProps.filter(x => x.id === id).length + 1, pivot: use.open ? hingeOf(obj, use.open) : null, busy: {} });
     }
     return spec.credit;
   }
@@ -203,6 +233,22 @@ async function extraClip(model, label) {
   model.clips.push(...retarget(cg.scene, [c], model.root, CMU_OPTS));
 }
 
+// where a sit clip is seated: the first and last moments the hips are near their lowest, and how high they are then
+function sitInfo(model, name) {
+  model.sitInfo ||= {}; if (model.sitInfo[name]) return model.sitInfo[name];
+  const clip = model.clips.find(c => c.name === name); if (!clip) return null;
+  model.probe ||= SkeletonUtils.clone(model.root);
+  let hips = null; model.probe.traverse(o => { if (!hips && o.isBone && o.name.endsWith("Hips")) hips = o; });
+  const mx = new THREE.AnimationMixer(model.probe), act = mx.clipAction(clip); act.play();
+  const ys = [], q0 = new Q(); for (let t = 0; t <= clip.duration; t += 1 / 30) { mx.setTime(t); model.probe.updateMatrixWorld(true); ys.push([t, hips.getWorldPosition(new V()).y]); }
+  const lo = Math.min(...ys.map(x => x[1])), stand = ys[0][1], near = ys.filter(x => x[1] < lo + 0.025);
+  // how far the body has turned by the time it sits (sit clips often turn round to the seat): the hips' heading change
+  const yawAt = t => { mx.setTime(t); model.probe.updateMatrixWorld(true); const f = new V(0, 0, 1).applyQuaternion(hips.getWorldQuaternion(q0)); return Math.atan2(f.x, f.z); };
+  const turn = Math.atan2(Math.sin(yawAt(near[0][0]) - yawAt(0)), Math.cos(yawAt(near[0][0]) - yawAt(0)));
+  mx.stopAllAction(); mx.uncacheRoot(model.probe);
+  return (model.sitInfo[name] = { down: near[0][0], up: near[near.length - 1][0], hipsY: lo, standY: stand, dur: clip.duration, turn });
+}
+
 const actors = {};
 function makeActor(spec, model) {
   const root = SkeletonUtils.clone(model.root), group = new THREE.Group(); group.add(root); scene.add(group);
@@ -214,8 +260,13 @@ function makeActor(spec, model) {
   });
   const a = { id: spec.id, spec, model, group, root, bones, morphs, mixer: new THREE.AnimationMixer(root), acts: {}, current: null, base: "idle",
     target: null, speaking: null, face: {}, blinkAt: 1 + Math.random() * 2, blinkT: -1, brows: 0, look: "camera", lookW: 0,
-    feet: { L: { lo: 9, up: true }, R: { lo: 9, up: true } }, headFwd: new V(0, 0, 1), seed: Math.random() * 10 };
-  a.mixer.addEventListener("finished", e => { if (e.action === a.current && !LOOPS.has(a.current._name)) play(a, a.base); });
+    feet: { L: { lo: 9, hi: -9, up: true, prev: null }, R: { lo: 9, hi: -9, up: true, prev: null } }, headFwd: new V(0, 0, 1), seed: Math.random() * 10,
+    after: null, pose: null, pending: null };
+  a.mixer.addEventListener("finished", e => {
+    if (e.action !== a.current) return;
+    if (a.pose?.phase === "up") { endPose(a); if (a.pending) { const b = a.pending; a.pending = null; doMove(a, b); return; } }
+    if (!LOOPS.has(a.current._name)) play(a, a.base);
+  });
   // the head's forward direction in its own space, from the rest pose facing +Z
   group.updateMatrixWorld(true); const gq = group.quaternion.clone(); group.quaternion.identity(); group.updateMatrixWorld(true);
   a.headFwd.set(0, 0, 1).applyQuaternion(bones.Head.getWorldQuaternion(new Q()).invert()); group.quaternion.copy(gq); group.updateMatrixWorld(true);
@@ -230,6 +281,7 @@ function action(a, name) {
 }
 function play(a, name, fade = 0.3) {
   const next = action(a, name); if (!next) return;
+  next.paused = false;
   if (next === a.current) { if (!LOOPS.has(name)) next.reset().play(); return; }
   next.reset().setEffectiveWeight(1).fadeIn(fade).play(); if (a.current) a.current.fadeOut(fade); a.current = next;
 }
@@ -311,10 +363,15 @@ function body(a, dt, t) {
   // walking towards a target
   if (a.target) {
     tmpV.copy(a.target).sub(a.group.position); tmpV.y = 0;
-    if (tmpV.length() < 0.1) { a.target = null; a.base = "idle"; play(a, "idle"); }
+    if (tmpV.length() < 0.1) { a.target = null; a.base = "idle"; const then = a.after; a.after = null; if (then) then(); else play(a, "idle"); }
     else { const d = tmpV.normalize(), want = Math.atan2(d.x, d.z); let dd = want - a.group.rotation.y; dd = Math.atan2(Math.sin(dd), Math.cos(dd));
       a.group.rotation.y += dd * Math.min(1, dt * 8); a.group.position.addScaledVector(d, SPEED[a.base] * dt); a.group.updateMatrixWorld(true); }
   }
+  if (a.turnTo != null && !a.target) {   // turning on the spot to a heading
+    let dd = a.turnTo - a.group.rotation.y; dd = Math.atan2(Math.sin(dd), Math.cos(dd));
+    if (Math.abs(dd) < 0.01) { a.group.rotation.y = a.turnTo; a.turnTo = null; } else a.group.rotation.y += dd * Math.min(1, dt * 7);
+  }
+  poseTick(a, dt); a.group.updateMatrixWorld(true);
   // head look
   const okMove = a.current && !["run", "jump", "dance", "kick", "pickup", "bow", "stretch", "sit"].includes(a.current._name) && !a.target;
   a.lookW += ((okMove ? 1 : 0) - a.lookW) * Math.min(1, dt * 3);
@@ -333,14 +390,105 @@ function body(a, dt, t) {
       }
     }
   }
-  // foot contacts (for footstep sounds)
-  const moving = a.current && ["walk", "run", "jump", "dance"].includes(a.current._name) || a.target;
+  // foot contacts (for footstep sounds). Travelling (walk/run to a spot): a foot lands when it stops moving over the
+  // ground (in-place clips + the body gliding forward: a planted foot stands still in the world). Moves on the spot:
+  // a foot lands when it comes down near its lowest point, measured against how high it has been lifted lately.
+  const moving = a.current && ["walk", "run", "jump", "dance", "jog", "march", "hop", "sneak", "happy walk", "sad walk", "limp", "moonwalk", "charleston"].includes(a.current._name) || a.target;
   for (const k of ["L", "R"]) {
-    const f = a.feet[k], y = a.bones[k === "L" ? "LeftFoot" : "RightFoot"].getWorldPosition(tmpV).y;
-    f.lo = Math.min(f.lo + dt * 0.02, y);
-    if (f.up && y < f.lo + 0.015) { f.up = false; if (moving) events.push({ t: +simT.toFixed(3), step: k, actor: a.id, pace: a.base }); }
-    else if (!f.up && y > f.lo + 0.035) f.up = true;
+    const f = a.feet[k], p = a.bones[k === "L" ? "LeftFoot" : "RightFoot"].getWorldPosition(new V()), y = p.y;
+    const sp = f.prev && dt > 0 ? Math.hypot(p.x - f.prev.x, p.z - f.prev.z) / dt : 0; f.prev = p;
+    f.lo = Math.min(f.lo + dt * 0.03, y); f.hi = Math.max(f.hi - dt * 0.06, y, f.lo + 0.02);
+    const lift = f.hi - f.lo, v = a.target ? SPEED[a.base] || 1.15 : 0;
+    const down = a.target ? sp < v * 0.55 && y < f.lo + lift * 0.6 : y < f.lo + Math.max(0.012, lift * 0.25);
+    const upNow = a.target ? sp > v * 0.8 : y > f.lo + Math.max(0.03, lift * 0.55);
+    if (f.up && down) { f.up = false; if (moving) events.push({ t: +simT.toFixed(3), step: k, actor: a.id, pace: a.base }); }
+    else if (!f.up && upNow) f.up = true;
+    if (window.__footTrace) window.__footTrace.push([+simT.toFixed(3), a.id, k, +y.toFixed(4), +sp.toFixed(3), f.up ? 1 : 0]);
   }
+}
+
+// ---------- using set props: sit on a seat, lean on a table or wall, open a door
+const clamp01 = x => Math.max(0, Math.min(1, x));
+function goThen(a, pt, then) {   // walk to a spot (if not there already), then do something
+  const d = Math.hypot(pt.x - a.group.position.x, pt.z - a.group.position.z);
+  if (d < 0.25) { a.group.position.x = pt.x; a.group.position.z = pt.z; then(); return; }
+  a.target = new V(pt.x, 0, pt.z); a.base = "walk"; play(a, "walk"); a.after = then;
+}
+function useProp(a, b) {
+  const p = findProp(b.on, a.group.position), u = p?.use?.[b.move];
+  if (!u) { console.warn(`no ${b.move} on ${b.on}`); if (action(a, b.move)) { a.base = "idle"; play(a, b.move); } return; }
+  const yaw = propYaw(p) + (u.face || 0) * Math.PI / 180, fwd = new V(Math.sin(yaw), 0, Math.cos(yaw));
+  if (b.move === "sit") {
+    const seats = (u.seats || [[0, 0.45, 0]]).map((s, i) => ({ i, w: toWorld(p, ...s) })).filter(s => !p.busy[s.i] || p.busy[s.i] === a.id);
+    if (!seats.length) { console.warn("no free seat on " + p.id); return; }
+    const seat = seats.sort((x, y) => x.w.distanceTo(a.group.position) - y.w.distanceTo(a.group.position))[0];
+    const front = seat.w.clone().setY(0).addScaledVector(fwd, 0.42);
+    p.busy[seat.i] = a.id;
+    goThen(a, front, () => startSit(a, p, seat.i, seat.w, yaw, front, u.clip || "sit"));
+  } else if (b.move === "lean") {
+    const spot = toWorld(p, u.at?.[0] || 0, 0, u.at?.[1] || 0).setY(0);
+    goThen(a, spot, () => startLean(a, yaw, u.kind || "table"));
+  } else if (b.move === "open" && p.pivot) {
+    const spot = toWorld(p, ...(u.stand ? [u.stand[0], 0, u.stand[1]] : [0, 0, 0.7])).setY(0);
+    goThen(a, spot, () => {
+      const c = p.obj.position, want = Math.atan2(c.x - a.group.position.x, c.z - a.group.position.z);
+      a.turnTo = want; a.base = "idle"; play(a, action(a, "point") ? "point" : "idle");
+      const shut = Math.abs(p.pivot.rotation.y) < 0.01;
+      p.opening = { t0: simT + 0.35, from: p.pivot.rotation.y, to: shut ? (u.angle ?? 100) * Math.PI / 180 : 0, secs: u.seconds || 1.2 };
+    });
+  }
+}
+function startSit(a, p, idx, seatW, yaw, front, clipName) {
+  if (!action(a, clipName)) clipName = "sit";
+  const info = sitInfo(a.model, clipName); if (!info) return;
+  a.group.rotation.y = yaw - info.turn; a.turnTo = null; a.base = "idle";   // so that the body faces out once seated
+  // the clip's hips stay over the feet (in place), so the body glides from the front spot back onto the seat as it sits;
+  // the hip joint ends about 10 cm above the seat
+  a.pose = { kind: "sit", phase: "down", prop: p, idx, from: a.group.position.clone().setY(0), seat: seatW.clone().setY(0), front, dy: seatW.y + 0.1 - info.hipsY, info };
+  play(a, clipName, 0.25); a.pose.act = a.current;
+}
+function startLean(a, yaw, kind) {
+  a.group.rotation.order = "YXZ"; a.group.rotation.y = yaw; a.turnTo = null; a.base = "idle";
+  if (kind === "wall" && action(a, "arms crossed")) play(a, "arms crossed"); else play(a, "idle");
+  a.pose = { kind: "lean", tilt: kind === "wall" ? -0.07 : 0.16, k: 0, out: false, act: a.current, holdAt: kind === "wall" ? a.current.getClip().duration * 0.5 : null };
+}
+function standUp(a) {
+  const P = a.pose; if (!P || P.kind !== "sit" || P.phase === "up") return;
+  P.phase = "up"; P.act.paused = false; P.act.time = Math.max(P.act.time, P.info.up);
+}
+function endPose(a) {
+  const P = a.pose; if (!P) return;
+  if (P.kind === "sit") { a.group.position.set(P.front.x, 0, P.front.z); delete P.prop.busy[P.idx]; }
+  a.group.rotation.x = 0; a.pose = null;
+}
+function poseTick(a, dt) {
+  const P = a.pose; if (!P) return;
+  const ease2 = x => x * x * (3 - 2 * x);
+  if (P.kind === "sit") {
+    const t = P.act.time, I = P.info, pos = a.group.position;
+    if (P.act !== a.current && P.phase !== "up") { endPose(a); return; }   // something else took over
+    if (P.phase === "down") {
+      const k = ease2(clamp01(t / Math.max(0.05, I.down)));
+      pos.lerpVectors(P.from, P.seat, k); pos.y = k * P.dy;
+      if (t >= I.down) { P.act.time = I.down; P.act.paused = true; P.phase = "seated"; }
+    } else if (P.phase === "seated") { pos.copy(P.seat); pos.y = P.dy; }
+    else { const k = ease2(clamp01((t - I.up) / Math.max(0.05, I.dur - I.up))); pos.lerpVectors(P.seat, P.front, k); pos.y = (1 - k) * P.dy; }
+  } else if (P.kind === "lean") {
+    P.k = clamp01(P.k + (P.out ? -1 : 1) * dt / 0.5); a.group.rotation.x = P.tilt * ease2(P.k);
+    if (P.holdAt != null && P.act === a.current && P.act.time >= P.holdAt) { P.act.time = P.holdAt; P.act.paused = true; P.holdAt = null; }
+    if (P.out && P.k <= 0) endPose(a);
+  }
+}
+function doMove(a, b) {   // a beat's walk / move / prop use for one actor
+  if (a.pose?.kind === "sit" && !(b.move === "sit" && b.on && !b.walkTo)) {
+    if (a.pose.phase === "up") { a.pending = b; return; }
+    a.pending = b; standUp(a); return;   // stand up first, then do it
+  }
+  if (a.pose?.kind === "lean") a.pose.out = true;
+  if (b.on && ["sit", "lean", "open"].includes(b.move)) { useProp(a, b); return; }
+  if (b.walkTo) { a.after = null; a.target = new V(b.walkTo[0], 0, b.walkTo[1]); a.base = b.run ? "run" : "walk"; play(a, a.base); }
+  if (b.move && !b.walkTo) { a.target = null; a.after = null; a.base = LOOPS.has(b.move) ? b.move : "idle"; play(a, b.move); }
+  else if (b.move) { const m = b.move; a.after = () => { a.base = LOOPS.has(m) ? m : "idle"; play(a, m); }; }
 }
 
 // ---------- camera shots
@@ -361,7 +509,8 @@ function shotPose(s) {
   // wide / two: frame everyone from in front of the group
   let spread = 0; for (const h of heads) spread = Math.max(spread, h.distanceTo(c));
   const f = list.reduce((p, a) => p.add(fwdOf(a)), new V()).setY(0); if (f.length() < 0.2) f.set(0, 0, 1); f.normalize();
-  const d = (s.type === "two" ? 2.6 : 4.4) + spread * (s.type === "two" ? 1.6 : 2.2), at = new V(c.x, s.type === "two" ? c.y - 0.25 : 0.95, c.z);
+  const wide = Math.max(1, (16 / 9) / cam.aspect);   // portrait frames (shorts) need more distance to fit people side by side
+  const d = (s.type === "two" ? 2.6 : 4.4) + spread * (s.type === "two" ? 1.6 : 2.2) * wide, at = new V(c.x, s.type === "two" ? c.y - 0.25 : 0.95, c.z);
   return { pos: at.clone().addScaledVector(f, d).add(new V(0, s.type === "two" ? 0.05 : 0.55, 0)), at, focus: c };
 }
 const ease = x => x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
@@ -376,16 +525,17 @@ function camera(t) {
 // ---------- beats
 const lines = Object.fromEntries((S.lines || []).map(l => [l.key, l]));
 let simT = 0;
+const usesShots = (S.beats || []).some(b => b.shot);
 function runBeats() {
   for (const b of S.beats || []) {
     if (b.done || simT + 1e-6 < b.t) continue; b.done = true;
     if (b.shot) { if (b.shot.move > 0) { shotFrom = shotPose(shot); shotT0 = simT; } shot = b.shot; }
     const a = actors[b.actor] || (!b.actor && Object.values(actors)[0]); if (!a) continue;
-    if (b.view && !b.shot) { if (shot.move > 0) shotFrom = null; shot = b.view === "face" ? { type: "close", actor: a.id } : { type: Object.keys(actors).length > 1 ? "two" : "wide" }; }
-    if (b.face !== undefined) a.group.rotation.y = b.face * Math.PI / 180;
+    // "view" is the simple camera (face / body); once a scene uses shots, shots decide (a later view used to undo an "over")
+    if (b.view && !b.shot && !usesShots) { if (shot.move > 0) shotFrom = null; shot = b.view === "face" ? { type: "close", actor: a.id } : { type: Object.keys(actors).length > 1 ? "two" : "wide" }; }
+    if (b.face !== undefined) { if (a.pose?.kind !== "sit") a.group.rotation.y = b.face * Math.PI / 180; }
     if (b.look) a.look = b.look;
-    if (b.walkTo) { a.target = new V(b.walkTo[0], 0, b.walkTo[1]); a.base = b.run ? "run" : "walk"; play(a, a.base); }
-    if (b.move) { a.target = null; a.base = LOOPS.has(b.move) ? b.move : "idle"; play(a, b.move); }
+    if (b.walkTo || b.move) doMove(a, b);
     const ps = propSpec(b); if (ps !== undefined) holdProp(a, ps, ps && ps !== "none" ? propSrc[ps.prop] : null);
     if (b.say && lines[b.say]) { a.speaking = { l: lines[b.say], t0: simT }; a.brows = 1; }
   }
@@ -399,15 +549,26 @@ function restart() {   // live loop: everyone back to their marks
   simT = 0; S.beats.forEach(b => (b.done = false)); shot = { type: "wide" }; shotFrom = null;
   for (const a of Object.values(actors)) {
     a.group.position.set(a.spec.at?.[0] || 0, 0, a.spec.at?.[1] || 0); a.group.rotation.y = (a.spec.face || 0) * Math.PI / 180;
-    a.target = null; a.speaking = null; a.look = "camera"; a.base = "idle"; play(a, "idle", 0.2); holdProp(a, null);
+    a.target = null; a.after = null; a.pending = null; a.turnTo = null; if (a.pose) endPose(a);
+    a.group.position.set(a.spec.at?.[0] || 0, 0, a.spec.at?.[1] || 0); a.group.rotation.set(0, (a.spec.face || 0) * Math.PI / 180, 0);
+    a.speaking = null; a.look = "camera"; a.base = "idle"; play(a, "idle", 0.2); holdProp(a, null);
   }
+  for (const p of setProps) { p.busy = {}; p.opening = null; if (p.pivot) p.pivot.rotation.y = 0; }
 }
-function frame(dt) {
+function heads() {   // each actor's head on screen, 0..1 from the top left (for speech bubbles)
+  cam.updateMatrixWorld(true); const out = {};
+  for (const a of Object.values(actors)) { const p = headPos(a).add(new V(0, 0.08, 0)).project(cam); out[a.id] = [+((p.x + 1) / 2).toFixed(4), +((1 - p.y) / 2).toFixed(4), p.z < 1 ? 1 : 0]; }
+  return out;
+}
+const probes = (S.probe || []).slice().sort((x, y) => x - y);
+function frame(dt, draw = true) {
   runBeats();
   for (const a of Object.values(actors)) { a.mixer.update(dt); a.root.updateMatrixWorld(true); body(a, dt, simT); face(a, dt, simT); }
+  for (const p of setProps) if (p.opening && p.pivot) { const o = p.opening, k = clamp01((simT - o.t0) / o.secs); p.pivot.rotation.y = o.from + (o.to - o.from) * ease(k); if (k >= 1) p.opening = null; }
   if (live) caption();
   if (ctl && !SCENE && window.__free) ctl.update(); else camera(simT);
-  grade.uniforms.t.value = simT; composer.render(dt);
+  while (probes.length && probes[0] <= simT + dt / 2) { probes.shift(); events.push({ t: +simT.toFixed(3), heads: heads() }); }
+  grade.uniforms.t.value = simT; if (draw) composer.render(dt);
   simT += dt;
 }
 
@@ -426,7 +587,9 @@ try {
 
 window.__prepare = async () => Object.keys(actors);
 window.__actors = actors; window.__grip = GRIP; window.__cam = cam; window.__loadProp = loadProp; window.__three = scene;   // for tuning grips from the console
-window.__step = async dt => frame(dt);
-window.__events = () => events;
+window.__step = async (dt, draw = true) => frame(dt, draw);
+window.__heads = heads; window.__props = setProps;
+if (S.traceFeet) window.__footTrace = [];   // tuning: per-frame foot height and ground speed in the events
+window.__events = () => window.__footTrace ? [...events, { trace: window.__footTrace }] : events;
 if (live && window.__ready === true) { const clock = new THREE.Clock(); r.setAnimationLoop(() => { const dt = Math.min(clock.getDelta(), 0.05); if (simT > S.duration) restart(); frame(dt); }); }
 </script></body></html>
