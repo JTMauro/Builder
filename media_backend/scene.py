@@ -79,14 +79,16 @@ def _srt_time(t: float) -> str:
 
 def _captions(lines: list[dict], max_words: int = 7) -> str:
     """SRT with short caption chunks from each line's word times (already offset to scene time)."""
-    out, n = [], 0
+    cues = []
     for ln in lines:
         words = ln["words"]
         for i in range(0, len(words), max_words):
             chunk = words[i:i + max_words]
-            n += 1
-            out.append(f"{n}\n{_srt_time(ln['t'] + chunk[0]['s'])} --> {_srt_time(ln['t'] + chunk[-1]['e'] + 0.25)}\n{' '.join(w['w'] for w in chunk)}\n")
-    return "\n".join(out)
+            cues.append([ln["t"] + chunk[0]["s"], ln["t"] + chunk[-1]["e"] + 0.25, " ".join(w["w"] for w in chunk)])
+    cues.sort()
+    for a, b in zip(cues, cues[1:]):   # never two captions on screen at once
+        a[1] = min(a[1], b[0] - 0.01)
+    return "\n".join(f"{n}\n{_srt_time(s)} --> {_srt_time(e)}\n{t}\n" for n, (s, e, t) in enumerate(cues, 1))
 
 
 def _node() -> str:
@@ -173,7 +175,7 @@ def scene_video(p: SceneParams) -> OpResult:
             fc.append(f"[{n}:a]adelay={ms}|{ms},volume={vol}[a{n}]")
         if tracks:
             fc.append("".join(f"[a{n}]" for n in range(1, len(tracks) + 1)) + f"amix=inputs={len(tracks)}:normalize=0:duration=longest,"
-                      f"apad,atrim=0:{duration},alimiter=limit=0.95[aout]")
+                      f"apad,atrim=0:{duration},loudnorm=I=-16:TP=-2:LRA=11,aresample=48000[aout]")
 
         # 4. picture: film look, then captions on top
         vf = []

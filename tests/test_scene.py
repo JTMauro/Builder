@@ -97,3 +97,9 @@ def test_render_still_needs_blender(tmp_path, monkeypatch):
     monkeypatch.setenv("BUILDER_MAKEHUMAN_DIR", str(tmp_path / "mh"))
     with pytest.raises(ops.OpError, match="aren't installed"):
         ops.run_operation("render_still", {"character": "teen"})
+
+
+def test_captions_never_overlap():
+    srt = scene._captions([{"t": 1.0, "words": [{"w": f"w{i}", "s": i * 0.3, "e": i * 0.3 + 0.28} for i in range(15)]}])
+    times = [ln.split(" --> ") for ln in srt.splitlines() if " --> " in ln]
+    assert len(times) == 3 and all(times[i][1] < times[i + 1][0] for i in range(2))
