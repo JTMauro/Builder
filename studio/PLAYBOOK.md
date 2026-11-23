@@ -78,6 +78,11 @@ fixed. Add to it at the end of every session (newest lessons at the top of each 
 
 ## Open issues
 
+- Studio tab: templates are saved in browser storage; move them to the library ops (characters.py
+  library_save_scene / library_get now exist). An "over" shot in a test render seemed to stay wide:
+  check shots reach studio.html in scene mode. Prop grips are first passes (football into the thigh,
+  jug handle). Preview line timing is estimated from text length.
+
 - Footstep detection found only 2 steps on a short walk: tune the contact threshold.
 - `fromLandmarks()` (motion from video) hasn't been tested on a real person's video yet.
 - Teen close-ups: skin a little pale; strand hair for Cycles in progress.
