@@ -242,10 +242,16 @@ def scene_video(p: SceneParams) -> OpResult:
     # 1. voices and the timeline
     beats, lines, voice_tracks, made, duration = build_timeline(p)
 
-    work = Path(tempfile.mkdtemp(prefix="scene-"))
+    scene, fetched = studio_scene(p, stage, beats, lines, w, h, duration)
+    # a render that is interrupted keeps its frames: the same scene resumes where it stopped
+    import hashlib
+
+    key = hashlib.sha1(json.dumps(scene, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    work = Path(os.environ.get("BUILDER_RENDER_CACHE") or (get_settings().data_dir / "render_cache")).expanduser() / key
+    work.mkdir(parents=True, exist_ok=True)
+    ok = False
     try:
         # 2. frames
-        scene, fetched = studio_scene(p, stage, beats, lines, w, h, duration)
         frames, events = render_stage(stage, scene, work)
 
         # 3. sound: voices at their times, footsteps at the feet's contact times, music under it all
@@ -297,9 +303,12 @@ def scene_video(p: SceneParams) -> OpResult:
             args += ["-map", "[aout]", *AUDIO_ENC]
         args += [*VIDEO_ENC, "-t", str(duration)]
         n_frames = len(list(frames.glob(f"*.{ext}")))
-        return _guarded("scene_video", made, f"scene_{p.stage}_{w}x{h}.mp4", lambda out: _ffmpeg(*args, str(out)),
+        res = _guarded("scene_video", made, f"scene_{p.stage}_{w}x{h}.mp4", lambda out: _ffmpeg(*args, str(out)),
                         data={"duration_s": duration, "frames": n_frames, "lines": len(lines), "footsteps": len(steps),
                               "timeline": beats, "stage": p.stage, "fetched_moves": fetched,
                               "heads": [e for e in events if "heads" in e]})
+        ok = True
+        return res
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        if ok:
+            shutil.rmtree(work, ignore_errors=True)

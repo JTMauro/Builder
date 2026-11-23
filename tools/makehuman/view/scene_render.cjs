@@ -41,9 +41,10 @@ const server = http.createServer((req, res) => {
   // scene.keep: only these frame numbers (1-based) are drawn and saved (stills, comics); [] simulates without drawing
   const keep = Array.isArray(scene.keep) ? new Set(scene.keep) : null;
   for (let i = 0; i < N; i++) {
-    const draw = !keep || keep.has(i + 1);
+    const fname = path.join(out, String(i + 1).padStart(6, "0") + (JPG ? ".jpg" : ".png"));
+    const draw = (!keep || keep.has(i + 1)) && !fs.existsSync(fname);   // resume: frames already on disk are only simulated
     const data = await p.evaluate(async ([dt, draw, jpg]) => { await window.__step(dt, draw); return draw ? document.querySelector("#stage canvas").toDataURL(jpg ? "image/jpeg" : "image/png", 0.95) : null; }, [1 / FPS, draw, JPG]);
-    if (data) fs.writeFileSync(path.join(out, String(i + 1).padStart(6, "0") + (JPG ? ".jpg" : ".png")), Buffer.from(data.split(",")[1], "base64"));
+    if (data) fs.writeFileSync(fname, Buffer.from(data.split(",")[1], "base64"));
     if (i % FPS === 0) console.log(`frame ${i + 1}/${N} (${((Date.now() - t0) / 1000).toFixed(0)} s)`);
   }
   fs.writeFileSync(path.join(out, "events.json"), JSON.stringify(await p.evaluate(() => window.__events())));
