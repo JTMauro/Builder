@@ -643,9 +643,135 @@ def animate_image(p: AnimateImageParams) -> OpResult:
                     lambda out: _ffmpeg(*args, str(out)))
 
 
+ASPECTS = {"9:16": (9, 16), "1:1": (1, 1), "4:5": (4, 5), "16:9": (16, 9), "21:9": (21, 9)}
+
+
+class ReframeParams(FileRef):
+    aspect: Literal["9:16", "1:1", "4:5", "16:9", "21:9"] = Field("9:16", description="Shape of the new video: 9:16 vertical (Reels/TikTok/Shorts), 1:1 square, 4:5 feed, 16:9 wide, 21:9 cinema")
+    mode: Literal["crop", "blur"] = Field("crop", description="crop: fill the frame (cuts the sides); blur: show the whole picture over a blurred, zoomed copy of itself")
+    height: int = Field(1920, ge=144, le=4320, description="Output height in px (width follows the aspect)")
+    focus: float = Field(0.5, ge=0, le=1, description="When cropping: where to keep, 0 = left/top, 0.5 = centre, 1 = right/bottom")
+
+
+@operation("reframe", ReframeParams, "Make a different-shaped version of a video for social media or cinema: vertical 9:16, square, 4:5, 16:9 or 21:9, by cropping or by placing it over a blurred background.")
+def reframe(p: ReframeParams) -> OpResult:
+    src = _src(p.file_id)
+    info = media_info(p.file_id)
+    if not info["has_video"]:
+        raise OpError("reframe needs a video")
+    aw, ah = ASPECTS[p.aspect]
+    h = p.height - p.height % 2
+    w = int(round(h * aw / ah / 2)) * 2
+    if p.mode == "crop":
+        f = p.focus
+        vf = (f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+              f"crop={w}:{h}:(iw-{w})*{f}:(ih-{h})*{f},setsar=1,format=yuv420p")
+        args = ["-i", str(src), "-vf", vf]
+    else:
+        fc = (f"[0:v]split[a][b];[a]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur=24:2,eq=brightness=-0.06[bg];"
+              f"[b]scale={w}:{h}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[v]")
+        args = ["-i", str(src), "-filter_complex", fc, "-map", "[v]", "-map", "0:a?"]
+    tag = p.aspect.replace(":", "x")
+    return _guarded("reframe", [p.file_id], f"{_stem(p.file_id)}_{tag}.mp4",
+                    lambda out: _ffmpeg(*args, *VIDEO_ENC, *AUDIO_ENC, str(out)),
+                    data={"width": w, "height": h})
+
+
+class TimelineClip(BaseModel):
+    file_id: str = Field(description="Video (or audio) file id")
+    start: float = Field(0, ge=0, description="Seconds into the file where this clip starts")
+    end: float | None = Field(None, gt=0, description="Seconds into the file where it ends (default: end of file)")
+    name: str | None = Field(None, max_length=120, description="Clip name shown in the editor")
+
+
+class TimelineParams(BaseModel):
+    clips: list[TimelineClip] = Field(min_length=1, max_length=300, description="Video clips in order, end to end")
+    music_id: str | None = Field(None, description="Optional soundtrack laid under the whole timeline")
+    name: str = Field("Builder timeline", max_length=120, description="Timeline (project) name")
+    fps: Literal[23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60] = Field(30, description="Timeline frame rate")
+    width: int | None = Field(None, ge=16, le=7680, description="Timeline width (default: first clip's)")
+    height: int | None = Field(None, ge=16, le=4320, description="Timeline height (default: first clip's)")
+
+
+def _rate(fps: float) -> tuple[int, int]:
+    """Frame duration as (numerator, denominator) seconds, e.g. 30 -> (1, 30), 29.97 -> (1001, 30000)."""
+    return {23.976: (1001, 24000), 29.97: (1001, 30000), 59.94: (1001, 60000)}.get(fps, (1, int(fps)))
+
+
+@operation("timeline_export", TimelineParams, "Write an edit timeline (FCPXML) that DaVinci Resolve, Final Cut and Premiere open: the clips in order with their in/out points, plus an optional soundtrack. In Resolve: File > Import > Timeline.")
+def timeline_export(p: TimelineParams) -> OpResult:
+    from xml.sax.saxutils import quoteattr
+
+    num, den = _rate(p.fps)
+    def t(frames: int) -> str:  # a frame count as rational seconds, the way FCPXML writes time
+        return f"{frames * num}/{den}s"
+
+    def fr(seconds: float) -> int:  # seconds to whole frames, halves rounding up (Python's round() rounds them to even)
+        return int(seconds * den / num + 0.5)
+    infos = {c.file_id: media_info(c.file_id) for c in p.clips}
+    first_video = next((infos[c.file_id]["video"] for c in p.clips if infos[c.file_id]["has_video"]), None)
+    if first_video is None:
+        raise OpError("timeline_export needs at least one video clip")
+    w = p.width or first_video["width"]
+    h = p.height or first_video["height"]
+    resources = [f'<format id="r0" name="FFVideoFormat{h}p{p.fps:g}" frameDuration="{num}/{den}s" width="{w}" height="{h}"/>']
+    assets, spine, offset = {}, [], 0
+    music_ids = [p.music_id] if p.music_id else []
+    for fid in [c.file_id for c in p.clips] + music_ids:
+        if fid in assets:
+            continue
+        info = infos.get(fid) or media_info(fid)
+        infos[fid] = info
+        frames = fr(info["duration_s"] or 0)
+        rid = f"r{len(assets) + 1}"
+        assets[fid] = rid
+        src = quoteattr(_src(fid).resolve().as_uri())
+        name = quoteattr(storage.get(fid).name)
+        resources.append(
+            f'<asset id="{rid}" name={name} src={src} start="0s" duration="{t(frames)}" '
+            f'hasVideo="{int(info["has_video"])}" hasAudio="{int(info["has_audio"])}"'
+            + (' format="r0"' if info["has_video"] else "")
+            + (' audioSources="1" audioChannels="2"' if info["has_audio"] else "") + "/>")
+    for c in p.clips:
+        info = infos[c.file_id]
+        if not info["has_video"]:
+            raise OpError(f"clip {c.file_id} has no video; put music in music_id instead")
+        total = info["duration_s"] or 0
+        end = min(c.end if c.end is not None else total, total) if total else (c.end or 0)
+        if end <= c.start:
+            raise OpError(f"clip {c.file_id}: end must be after start (file is {total:.2f}s long)")
+        s_fr, d_fr = fr(c.start), fr(end - c.start)
+        name = quoteattr(c.name or Path(storage.get(c.file_id).name).stem)
+        spine.append(f'<asset-clip ref="{assets[c.file_id]}" name={name} offset="{t(offset)}" start="{t(s_fr)}" '
+                     f'duration="{t(d_fr)}" format="r0" tcFormat="NDF"/>')
+        offset += d_fr
+    if p.music_id:
+        mi = infos[p.music_id]
+        m_fr = min(offset, fr(mi["duration_s"] or 0))
+        music = (f'<asset-clip ref="{assets[p.music_id]}" lane="-1" name="Soundtrack" offset="0s" start="0s" '
+                 f'duration="{t(m_fr)}" audioRole="music"/>')
+        # a connected clip lives inside the first spine clip
+        spine[0] = spine[0][:-2] + ">" + music + "</asset-clip>"
+    xml = "\n".join([
+        '<?xml version="1.0" encoding="UTF-8"?>', "<!DOCTYPE fcpxml>", '<fcpxml version="1.9">',
+        "  <resources>", *("    " + r for r in resources), "  </resources>",
+        "  <library>", '    <event name="Builder">', f"      <project name={quoteattr(p.name)}>",
+        f'        <sequence format="r0" duration="{t(offset)}" tcStart="0s" tcFormat="NDF">', "          <spine>",
+        *("            " + s for s in spine), "          </spine>", "        </sequence>", "      </project>",
+        "    </event>", "  </library>", "</fcpxml>", ""])
+    parents = list(dict.fromkeys([c.file_id for c in p.clips] + music_ids))
+    safe = storage.safe_name(p.name).replace(" ", "_") or "timeline"
+    return _guarded("timeline_export", parents, f"{safe}.fcpxml", lambda out: out.write_text(xml, encoding="utf-8"),
+                    data={"clips": len(p.clips), "duration_s": round(offset * num / den, 3), "fps": p.fps, "width": w, "height": h,
+                          "how_to_open": "DaVinci Resolve: File > Import > Timeline, pick this .fcpxml (keep the media files where they are)."})
+
+
 def describe_operations() -> list[dict[str, Any]]:
     return [
         {"name": op.name, "description": op.description, "read_only": op.read_only,
          "params_schema": op.params.model_json_schema()}
         for op in REGISTRY.values()
     ]
+
+
+from . import unreal as _unreal  # noqa: E402,F401  (registers the unreal_* operations)

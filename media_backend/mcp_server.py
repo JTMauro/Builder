@@ -222,10 +222,35 @@ def build_server(media_only: bool | None = None) -> MCPServer:
         mcp.add_tool(run, name=op.name, description=run.__doc__)
 
     for op in ops.REGISTRY.values():
+        # Unreal renders and scripts drive this computer's Unreal Editor: not for builds running as a plugin
+        if media_only and op.name.startswith("unreal_"):
+            continue
         register_op(op)
 
     if media_only:
         return mcp
+
+    # ---------------------------------------------------------------- watch folders (e.g. DaVinci Resolve exports)
+
+    from . import watch
+
+    @mcp.tool()
+    def watch_folders_list() -> dict[str, Any]:
+        """List folders Builder watches for finished videos (e.g. DaVinci Resolve's render folder), with recent results."""
+        return {"folders": watch.list_folders(), "presets": {k: [label for _, _, label in v] for k, v in watch.PRESETS.items()},
+                "recent": watch.log[-10:]}
+
+    @mcp.tool()
+    def watch_folder_add(path: str, preset: str = "social", ctx: Context | None = None) -> dict[str, Any]:
+        """Watch a folder: each new video that lands there is imported and turned into the preset's versions,
+        saved beside it in "Builder output". Presets: social (vertical 9:16, square, 1080p web copy, thumbnail, GIF),
+        web (1080p copy + thumbnail), import (library only). Videos already in the folder are left alone."""
+        return watch.add_folder(path, preset, owner=caller(ctx))
+
+    @mcp.tool()
+    def watch_folder_remove(folder_id: str) -> str:
+        """Stop watching a folder (its id is in watch_folders_list)."""
+        return "removed" if watch.remove_folder(folder_id) else "no such watch folder"
 
     # ---------------------------------------------------------------- Craft builds (engine/)
     # Builds started over MCP belong to the "claude-code" owner (their own projects folder).

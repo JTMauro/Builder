@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
 from . import __version__, ops, storage
-from . import craft, remote, settings_file
+from . import craft, remote, settings_file, unreal, watch
 from .assistant import AssistantNotConfigured, ChatNotFound, ChatResult, get_assistant
 from .config import get_settings
 from .jobs import Job, get_queue
@@ -77,6 +77,11 @@ class BuildAnswer(BaseModel):
     always: bool = False
 
 
+class WatchFolder(BaseModel):
+    path: str
+    preset: str = "social"
+
+
 class ClaudeKey(BaseModel):
     key: str
 
@@ -133,11 +138,14 @@ def create_app() -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
         _start_remote_from_settings()
+        if watch.list_folders():
+            watch.ensure_running()
         async with mcp.session_manager.run():
             try:
                 yield
             finally:
                 remote.get_tunnel().stop()
+                watch.stop()
 
     app = FastAPI(
         title="Builder API", version=__version__, lifespan=lifespan,
@@ -379,6 +387,28 @@ def create_app() -> FastAPI:
             raise HTTPException(422, str(e))
         settings_file.save_secret("BUILDER_REMOTE", body.mode)
         return status
+
+    # ------------------------------------------------------------ watch folders and Unreal (admins: they touch this computer's folders)
+
+    @app.get("/watch")
+    def watch_list(_: User = Depends(admin_user)):
+        return {"folders": watch.list_folders(), "presets": list(watch.PRESETS), "recent": watch.log[-20:]}
+
+    @app.post("/watch", status_code=201)
+    def watch_add(body: WatchFolder, user: User = Depends(admin_user)):
+        try:
+            return watch.add_folder(body.path, body.preset, owner=user.username)
+        except watch.WatchError as e:
+            raise HTTPException(422, str(e))
+
+    @app.delete("/watch/{folder_id}", status_code=204)
+    def watch_remove(folder_id: str, _: User = Depends(admin_user)):
+        if not watch.remove_folder(folder_id):
+            raise HTTPException(404, "No such watch folder")
+
+    @app.get("/unreal")
+    def unreal_info(_: User = Depends(admin_user)):
+        return unreal.status()
 
     # ------------------------------------------------------------ connect (everyone signed in)
 

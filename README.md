@@ -175,6 +175,20 @@ claude mcp add builder -- builder mcp
 | `add_text` | Burn in a caption/title; shrinks to fit |
 | `images_to_video` | **Animation**: frames to MP4 at an fps, or a slideshow; optional soundtrack and loops |
 | `animate_image` | **Animation**: bring one still image to life: zoom_in, zoom_out, pan_left, pan_right, bounce, wobble |
+| `reframe` | Vertical 9:16, square, 4:5, 16:9 or 21:9 versions, by cropping or over a blurred background |
+| `timeline_export` | An edit timeline (FCPXML) for DaVinci Resolve, Final Cut or Premiere: clips with in/out points plus music |
+| `unreal_status` | Finds Unreal Engine and your projects, and lists plugins a render still needs |
+| `unreal_render` | Renders an Unreal Level Sequence (MetaHumans included) with Movie Render Queue, 4K by default, to ProRes / H.265 / H.264 |
+| `unreal_script` | Runs Python inside the Unreal Editor, headless (off unless `UNREAL_ALLOW_SCRIPTS=on`) |
+
+**Watch folders** (connector tools `watch_folder_add` / `watch_folders_list` / `watch_folder_remove`, or
+`GET/POST/DELETE /watch`): every new video in a watched folder, e.g. DaVinci Resolve's render folder, is
+imported and turned into a preset's versions in `Builder output` beside it (`social`: vertical, square, web
+copy, thumbnail, GIF; `web`; `import`).
+
+Film-quality people with Unreal Engine + MetaHuman + DaVinci Resolve, step by step:
+[docs/unreal-metahuman.md](docs/unreal-metahuman.md). Free, game-ready realistic people with Blender +
+MakeHuman: [tools/makehuman/README.md](tools/makehuman/README.md).
 
 Inputs are never modified. Every operation writes new file(s) to the store and returns their ids.
 

@@ -1,6 +1,6 @@
 ---
 name: use-builder
-description: Use the Builder media backend (audio/video tools, Rivet the Claude assistant, web app) from another project, or extend Builder itself. Use when a task needs video or audio processing (trim, convert, captions, soundtracks, joining clips, GIFs, thumbnails, frame-by-frame or still-image animation), when someone mentions Builder or Rivet, or when adding a feature to this repository.
+description: Use the Builder media backend (audio/video tools, Rivet the Claude assistant, web app) from another project, or extend Builder itself. Use when a task needs video or audio processing (trim, convert, captions, soundtracks, joining clips, GIFs, thumbnails, vertical/square social versions, frame-by-frame or still-image animation), a DaVinci Resolve timeline or watch folder, an Unreal Engine / MetaHuman 4K render, when someone mentions Builder or Rivet, or when adding a feature to this repository.
 ---
 
 # Using Builder
@@ -60,3 +60,12 @@ Read `CLAUDE.md` first. A new operation is a params model plus an `@operation` f
 `media_backend/ops.py` that wraps its ffmpeg call in `_guarded(...)`. It appears in the API, Rivet and
 the MCP connector automatically. Add a test in `tests/test_ops.py` and run `pytest -q`.
 Only original characters and assets: don't recreate trademarked characters.
+
+## Film work: Unreal Engine, MetaHuman, DaVinci Resolve
+
+On the PC running Builder for Windows: `unreal_status` (is Unreal ready?), `unreal_render` (render a Level
+Sequence with Movie Render Queue, 4K ProRes by default; long, so start with `wait=false` and poll
+`get_job`), `unreal_script` (only if the person set `UNREAL_ALLOW_SCRIPTS=on`), `timeline_export` (FCPXML
+for Resolve: *File > Import > Timeline*), `reframe`, and watch folders (`watch_folder_add` with the
+`social` preset on Resolve's render folder). Setup guide: `docs/unreal-metahuman.md`.
+
