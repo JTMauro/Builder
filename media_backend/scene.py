@@ -98,14 +98,36 @@ def _node() -> str:
     return node
 
 
+def render_stage(stage: Path, scene: dict, work: Path) -> tuple[Path, list[dict]]:
+    """Render a scene dict on a stage folder to work/frames/*.png; returns (frames dir, foot events)."""
+    driver = Path(os.environ.get("SCENE_RENDERER") or REPO_VIEW / "scene_render.cjs")
+    if not driver.exists():
+        raise OpError(f"scene renderer not found at {driver}")
+    (work / "scene.json").write_text(json.dumps(scene), encoding="utf-8")
+    frames = work / "frames"
+    runner = [sys.executable] if driver.suffix == ".py" else [_node()]   # .py: a stand-in renderer (tests)
+    proc = subprocess.run([*runner, str(driver), str(stage), str(work / "scene.json"), str(frames)],
+                          capture_output=True, text=True, cwd=str(driver.parent), **NO_WINDOW)
+    if proc.returncode != 0:
+        raise OpError("render failed:\n" + "\n".join((proc.stderr or proc.stdout).strip().splitlines()[-8:]))
+    events = json.loads((frames / "events.json").read_text(encoding="utf-8")) if (frames / "events.json").exists() else []
+    return frames, events
+
+
+def stage_moves(stage: str) -> list[str]:
+    """Moves a stage can play: built-in clips and gestures, plus its extra motion-capture moves."""
+    base = ["idle", "walk", "run", "wave", "point", "thumbs up", "agree", "headShake", "arms crossed",
+            "jump", "sit", "dance", "shrug", "bow", "stretch", "kick", "pickup", "hello", "laugh"]
+    ix = stages_dir() / stage / "clips" / "cmu" / "index.json"
+    extra = list(json.loads(ix.read_text(encoding="utf-8"))) if ix.exists() else []
+    return base + [m for m in extra if m not in base]
+
+
 @operation("scene_video", SceneParams, "Make a finished video of a 3D character acting out a scene: give beats (lines to say, moves, camera, walking); Builder voices each line, lip-syncs it, renders the stage frame by frame, adds footsteps, optional original music, captions and a film look. Long: start with wait=false.")
 def scene_video(p: SceneParams) -> OpResult:
     stage = stages_dir() / p.stage
     if not (stage / "index.html").exists():
         raise OpError(f"no stage called {p.stage!r} (have: {', '.join(list_stages()) or 'none'}); build one with tools/makehuman/make_stage.py")
-    driver = Path(os.environ.get("SCENE_RENDERER") or REPO_VIEW / "scene_render.cjs")
-    if not driver.exists():
-        raise OpError(f"scene renderer not found at {driver}")
     w, h = (int(x) for x in p.resolution.split("x"))
 
     # 1. voices and the timeline
@@ -146,14 +168,7 @@ def scene_video(p: SceneParams) -> OpResult:
         # 2. frames
         scene = {"width": w, "height": h, "fps": p.fps, "duration": duration, "beats": beats,
                  "lines": [{k: v for k, v in ln.items() if k != "t"} for ln in lines]}
-        (work / "scene.json").write_text(json.dumps(scene), encoding="utf-8")
-        frames = work / "frames"
-        runner = [sys.executable] if driver.suffix == ".py" else [_node()]   # .py: a stand-in renderer (tests)
-        proc = subprocess.run([*runner, str(driver), str(stage), str(work / "scene.json"), str(frames)],
-                              capture_output=True, text=True, cwd=str(driver.parent), **NO_WINDOW)
-        if proc.returncode != 0:
-            raise OpError("render failed:\n" + "\n".join((proc.stderr or proc.stdout).strip().splitlines()[-8:]))
-        events = json.loads((frames / "events.json").read_text(encoding="utf-8")) if (frames / "events.json").exists() else []
+        frames, events = render_stage(stage, scene, work)
 
         # 3. sound: voices at their times, footsteps at the feet's contact times, music under it all
         tracks: list[tuple[Path, float, float]] = [(storage.path_of(fid), t, 1.0) for fid, t in voice_tracks]
