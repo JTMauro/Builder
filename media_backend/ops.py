@@ -775,3 +775,4 @@ def describe_operations() -> list[dict[str, Any]]:
 
 
 from . import unreal as _unreal  # noqa: E402,F401  (registers the unreal_* operations)
+from . import assets as _assets  # noqa: E402,F401  (registers asset_search, asset_import, page_references)

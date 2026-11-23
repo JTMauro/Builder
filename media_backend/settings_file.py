@@ -34,6 +34,9 @@ MEDIA_BACKEND_ALLOWED_DIRS=
 # Let anyone who can reach Builder make an account from the sign-in screen.
 # MEDIA_BACKEND_OPEN_SIGNUP=off
 
+# Freesound sound effects for the asset finder (free key: https://freesound.org/apiv2/apply).
+# FREESOUND_API_KEY=
+
 # Unreal Engine (renders with Movie Render Queue). Builder looks in the usual places if these are empty.
 # UNREAL_EDITOR=C:\\Program Files\\Epic Games\\UE_5.6
 # UNREAL_PROJECT=C:\\Users\\YOU\\Documents\\Unreal Projects\\Film\\Film.uproject

@@ -177,6 +177,9 @@ claude mcp add builder -- builder mcp
 | `animate_image` | **Animation**: bring one still image to life: zoom_in, zoom_out, pan_left, pan_right, bounce, wobble |
 | `reframe` | Vertical 9:16, square, 4:5, 16:9 or 21:9 versions, by cropping or over a blurred background |
 | `timeline_export` | An edit timeline (FCPXML) for DaVinci Resolve, Final Cut or Premiere: clips with in/out points plus music |
+| `asset_search` | Free, licensed assets for builds: HDRI skies, PBR textures and 3D models (Poly Haven, ambientCG; CC0), Creative Commons images and sounds (Openverse), sound effects (Freesound with `FREESOUND_API_KEY`) |
+| `asset_import` | Download a found asset (or a direct link) into the library; its licence and credit line are saved in `license.json` beside it |
+| `page_references` | Collect the images on one web page as look references |
 | `unreal_status` | Finds Unreal Engine and your projects, and lists plugins a render still needs |
 | `unreal_render` | Renders an Unreal Level Sequence (MetaHumans included) with Movie Render Queue, 4K by default, to ProRes / H.265 / H.264 |
 | `unreal_script` | Runs Python inside the Unreal Editor, headless (off unless `UNREAL_ALLOW_SCRIPTS=on`) |

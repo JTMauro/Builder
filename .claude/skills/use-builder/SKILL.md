@@ -69,3 +69,9 @@ Sequence with Movie Render Queue, 4K ProRes by default; long, so start with `wai
 for Resolve: *File > Import > Timeline*), `reframe`, and watch folders (`watch_folder_add` with the
 `social` preset on Resolve's render folder). Setup guide: `docs/unreal-metahuman.md`.
 
+## Free assets for a build
+
+`asset_search` (HDRI skies, textures, models, CC images and sounds; licence and credit in every result),
+then `asset_import` with the result's `source` and `id` (credit saved in `license.json`), and
+`page_references` to gather look references from one page. Prefer CC0; keep the attribution for CC BY.
+
