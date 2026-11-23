@@ -78,6 +78,12 @@ fixed. Add to it at the end of every session (newest lessons at the top of each 
 
 ## Open issues
 
+- BUG: all characters share ~/.builder/makehuman/mhtex, so building a new one (e.g. friend) changes
+  older .blend characters' hair/shirt/eye colours in Cycles stills. Fix: per-character texture
+  folders in gen.py / run_job.py. (Stage .json models embed their textures and are not affected.)
+- Cycles `--strand-hair` / `--cloth-detail` work (opt-in). To do: break up the glossy hair highlight,
+  raise the fringe, pose-based folds, test long/ponytail hair, full-body cloth before/after renders.
+
 - Studio tab: templates are saved in browser storage; move them to the library ops (characters.py
   library_save_scene / library_get now exist). An "over" shot in a test render seemed to stay wide:
   check shots reach studio.html in scene mode. Prop grips are first passes (football into the thigh,
