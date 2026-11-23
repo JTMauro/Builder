@@ -42,7 +42,7 @@ const server = http.createServer((req, res) => {
   const keep = Array.isArray(scene.keep) ? new Set(scene.keep) : null;
   for (let i = 0; i < N; i++) {
     const draw = !keep || keep.has(i + 1);
-    const data = await p.evaluate(async ([dt, draw]) => { await window.__step(dt, draw); return draw ? document.querySelector("#stage canvas").toDataURL(JPG ? "image/jpeg" : "image/png", 0.95) : null; }, [1 / FPS, draw]);
+    const data = await p.evaluate(async ([dt, draw, jpg]) => { await window.__step(dt, draw); return draw ? document.querySelector("#stage canvas").toDataURL(jpg ? "image/jpeg" : "image/png", 0.95) : null; }, [1 / FPS, draw, JPG]);
     if (data) fs.writeFileSync(path.join(out, String(i + 1).padStart(6, "0") + (JPG ? ".jpg" : ".png")), Buffer.from(data.split(",")[1], "base64"));
     if (i % FPS === 0) console.log(`frame ${i + 1}/${N} (${((Date.now() - t0) / 1000).toFixed(0)} s)`);
   }
