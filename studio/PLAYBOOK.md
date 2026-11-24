@@ -81,6 +81,7 @@ fixed. Add to it at the end of every session (newest lessons at the top of each 
   alignment in numpy. The disk filled up twice this session: check `df -h /` before big downloads.
 - Kokoro voices: language from the name's first letter (a/b English, e Spanish, f French, i Italian,
   p Portuguese, h Hindi). Whisper checks intelligibility after generating.
+- Artifact pages don't serve .glb/.hdr/.zip: ship GLBs as base64 JSON wrappers (or one-file glTF JSON).
 - Mix with loudnorm to −16 LUFS and a −2 dBTP ceiling (a limiter at 0.95 still hit 0 dBTP after AAC).
 - faster-whisper + PyAV fails on some files: decode with ffmpeg to 16 kHz float PCM first.
 - MediaPipe on Linux needs `libegl1 libgles2`.
@@ -158,7 +159,7 @@ Other sessions:
 - "Unhappy Woks" game chat: session_01V21hok3hsG5ZSmGSQN58aN. It asks for assets by message; ask the owner before
   starting each new request (the owner approved sounds, worlds and trees). Reply with send_message + artifact URL.
 
-In progress (2026-11-24): 17 tree/plant GLBs for Unhappy Woks, built by two helpers into
+Done (2026-11-24): 17 tree/plant GLBs, published at https://claude.ai/artifact/4uBdMn7iHdKQEwW3UhDqBn as base64 <name>.glb.json (artifacts don't serve .glb); was for Unhappy Woks, built by two helpers into
 scratchpad/trees/out/ (tools/gamesfx/trees_woody.py: forest giant, forest conifer, ice pine, ice dead, desert dead,
 peaks pine, swamp cypress, temple jungle, lava charred; tools/gamesfx/trees_leafy.py: forest broadleaf, fern,
 desert cactus, desert shrub, peaks birch, swamp reeds, temple palm, temple fern). Requirements: GLB, Y-up, metres,
