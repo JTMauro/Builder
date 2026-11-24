@@ -144,6 +144,32 @@ lines, characters, stage, renders). Refresh them at the end of big sessions (con
   bench scene as "almost no motion" / "low contrast" (small figure): the bench compares new issues only.
 - Bench timings swing 2–10x when other jobs share the CPU: slow steps are notes, not regressions.
 
+## Links and running work (keep current)
+
+Pages (private artifacts, owner can share):
+- Screening Room (all films/pictures/sounds, phone-friendly): https://claude.ai/artifact/5vMyt8ytsU4KfurHZzAnjB
+- Studio Toolbox (free apps/libraries catalog): https://claude.ai/artifact/Xw2HtK5DPwnaWhjKMVEoFN
+- Talking Teen: https://claude.ai/artifact/VZoBkwaPDJ3ffodiep7aXo · Teen in Motion: https://claude.ai/artifact/8is8TWytN2XpjQMdmhgPs3
+- Crossed-Arms Teen: https://claude.ai/artifact/8j2D2hnRCTosgUnohcub2E · Craft Studio: https://claude.ai/artifact/M9fWEdBoJXToL7TMRF6B2i
+- Unhappy Woks sound pack (47 sounds): https://claude.ai/artifact/LWxWzE5AvYJQ6GobgQkx4C (tools/gamesfx/unhappy_woks.py)
+- Unhappy Woks worlds (10 grounds + normals + backdrops, lava emissive): https://claude.ai/artifact/SwraovSPohBqFvuqhKnJTE (tools/gamesfx/worlds.py, hdri_tools.py)
+
+Other sessions:
+- "Unhappy Woks" game chat: session_01V21hok3hsG5ZSmGSQN58aN. It asks for assets by message; ask the owner before
+  starting each new request (the owner approved sounds, worlds and trees). Reply with send_message + artifact URL.
+
+In progress (2026-11-24): 17 tree/plant GLBs for Unhappy Woks, built by two helpers into
+scratchpad/trees/out/ (tools/gamesfx/trees_woody.py: forest giant, forest conifer, ice pine, ice dead, desert dead,
+peaks pine, swamp cypress, temple jungle, lava charred; tools/gamesfx/trees_leafy.py: forest broadleaf, fern,
+desert cactus, desert shrub, peaks birch, swamp reeds, temple palm, temple fern). Requirements: GLB, Y-up, metres,
+origin at base, embedded PBR textures ≤1024, alpha MASK leaves, ≤15k tris and ≤600 KB each, ~7 MB total, CC0/original,
+manifest.json {"files":[{"file","world","kind","height_m","tris","bytes","source"}]}. When both are done: check the
+contact sheets, publish one artifact (models + manifest), send the URL to the game chat, commit the generators.
+If the scratchpad was lost, re-run both generators (they rebuild everything).
+
+Final films: The Reluctant Champion (arena comedy, 1080p, script in studio/scripts/arena_comedy.md, params in
+scratchpad runs/arena_params.json), Jay & Maya park dialogue, first teen test. Masters were sent to the owner as files.
+
 ## Where we stopped (resume here)
 
 - Done this session: scene_video with casts, 9 sets, props, camera shots; director, make_anything,
