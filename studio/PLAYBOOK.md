@@ -110,7 +110,9 @@ fixed. Add to it at the end of every session (newest lessons at the top of each 
   rough outline; plants sway by height above the root; smiles lift the mouth corners and waves rotate an
   arm around the elbow, both easing back by the loop end. Swim-through: GrabCut + outline for the cutout,
   dilate the hole well past the animal, fill with a normalised blur of the surroundings plus fine detail
-  borrowed from another part of the picture (a plain inpaint leaves a dark ghost). GIFs are heavy: about
+  borrowed from a matching part of the picture, never from other animals' spots (a plain inpaint leaves a dark ghost).
+  Cut animals out by comparing each pixel with the local water colour (refine2.py), or a box of sea
+  travels with them; then pull the water tint out of the soft edge. GIFs are heavy: about
   720x405 at 12 fps for 6 s is roughly 13 MB.
 
 ### Python package

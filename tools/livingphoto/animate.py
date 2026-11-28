@@ -3,6 +3,7 @@ import sys, math, subprocess, os, numpy as np, cv2
 from PIL import Image, ImageDraw
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scenes_underwater as scenes
+from refine2 import refine2
 
 def polymask(W, H, poly, s, dx=0, dy=0):
     m = Image.new('L', (W, H), 0); ImageDraw.Draw(m).polygon([(x*s + dx, y*s + dy) for x, y in poly], fill=255)
@@ -44,12 +45,18 @@ def fill_hole(img, hole):
     # borrow fine detail (fish, specks, texture) from a part of the picture outside the hole
     hp = img - cv2.GaussianBlur(img, (0, 0), 6 * W / 960)
     hb = (hole > 0.02).astype(np.float32); best = None
-    for fx, fy in ((0, .5), (0, -.5), (.5, 0), (-.5, 0), (.33, .33), (-.33, .33), (.33, -.33), (-.33, -.33), (0, .33), (0, -.33), (.25, 0), (-.25, 0)):
+    lo = cv2.GaussianBlur(img, (0, 0), 12 * W / 960)
+    hm_ = hb > 0; nh = hm_.sum() + 1
+    cands = [(fx, fy) for fx in (-.6, -.45, -.3, -.2, -.12, .12, .2, .3, .45, .6) for fy in (-.12, -.06, 0, .06, .12)]
+    for fx, fy in cands:
         dx, dy = int(fx * W), int(fy * H)
-        over = (np.roll(hb, (dy, dx), (0, 1)) * hb).sum()
-        if best is None or over < best[0]: best = (over, dx, dy)
-    donor = np.roll(hp, (best[2], best[1]), (0, 1))
-    out = np.clip(out + donor * 0.95, 0, 1)
+        over = (np.roll(hb, (dy, dx), (0, 1)) * hb).sum() / nh
+        mis = np.abs(np.roll(lo, (dy, dx), (0, 1))[hm_] - out[hm_]).mean()
+        sc = mis + 0.25 * over
+        if best is None or sc < best[0]: best = (sc, dx, dy)
+    hpm = hp * (1 - cv2.dilate(hb, np.ones((15, 15), np.uint8)))[..., None]
+    donor = np.roll(hpm, (best[2], best[1]), (0, 1))
+    out = np.clip(out + donor * 0.7, 0, 1)
     hm = soft(hole, 6 * W / 960)[..., None]
     return img * (1 - hm) + out * hm
 
@@ -90,12 +97,12 @@ def render(name, cfg, out_mp4, W=960, fps=15, secs=6, swim=None, seed=1):
         for key, py_, scale, off, speed in swim:
             c = scenes.C[key]; srcimg = img if c['img'] == name else load(c['img'], W)
             pm = polymask(srcimg.shape[1], srcimg.shape[0], c['poly'], s)
-            a = np.maximum(refine(srcimg, c['poly'], s), soft(pm, 1.5))
+            a, srccol = refine2(srcimg, pm)
             if c['img'] == name:
-                removed.add(key); hole = np.maximum(hole, cv2.dilate(a, np.ones((int(17*s), int(17*s)), np.uint8)))
+                removed.add(key); hole = np.maximum(hole, cv2.dilate(np.maximum(a, pm), np.ones((int(17*s), int(17*s)), np.uint8)))
             ys, xs = np.nonzero(a > 0.05); pad = int(20 * s)
             x0, x1 = max(xs.min() - pad, 0), min(xs.max() + pad, W); y0, y1 = max(ys.min() - pad, 0), min(ys.max() + pad, srcimg.shape[0])
-            patch = np.dstack([srcimg[y0:y1, x0:x1], a[y0:y1, x0:x1]])
+            patch = np.dstack([srccol[y0:y1, x0:x1], a[y0:y1, x0:x1]])
             sc = scale
             if sc != 1: patch = cv2.resize(patch, (max(2, int(patch.shape[1]*sc)), max(2, int(patch.shape[0]*sc))), interpolation=cv2.INTER_AREA)
             ph_, pw_ = patch.shape[:2]
