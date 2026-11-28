@@ -42,6 +42,13 @@ def fill_hole(img, hole):
         den = cv2.GaussianBlur(keep, (0, 0), sig * W / 960)[..., None]
         est = num / np.maximum(den, 1e-4)
         out = est if sig == 60 else np.where(den > 0.25, est, out)
+    # same-depth estimate (water brightness changes with depth): wide sideways, softened up/down
+    sc_ = W / 960
+    numr = cv2.GaussianBlur(img * keep[..., None], (0, 0), sigmaX=220 * sc_, sigmaY=28 * sc_)
+    denr = cv2.GaussianBlur(keep, (0, 0), sigmaX=220 * sc_, sigmaY=28 * sc_)[..., None]
+    rowest = numr / np.maximum(denr, 1e-4)
+    wr = np.clip((denr - 0.03) / 0.12, 0, 1) * 0.7
+    out = out * (1 - wr) + rowest * wr
     # borrow fine detail (fish, specks, texture) from a part of the picture outside the hole
     hp = img - cv2.GaussianBlur(img, (0, 0), 6 * W / 960)
     hb = (hole > 0.02).astype(np.float32); best = None
@@ -109,7 +116,7 @@ def render(name, cfg, out_mp4, W=960, fps=15, secs=6, swim=None, seed=1):
                 a = np.maximum(a, soft(core, 1.0))
                 srccol = np.where((core > 0.5)[..., None], srcimg, srccol)
             if c['img'] == name:
-                removed.add(key); hole = np.maximum(hole, cv2.dilate(np.maximum(a, pm), np.ones((int(17*s), int(17*s)), np.uint8)))
+                kk = int((29 if key in scenes.SOLID else 17) * s); removed.add(key); hole = np.maximum(hole, cv2.dilate(np.maximum(a, pm), np.ones((kk, kk), np.uint8)))
             ys, xs = np.nonzero(a > 0.05); pad = int(20 * s)
             x0, x1 = max(xs.min() - pad, 0), min(xs.max() + pad, W); y0, y1 = max(ys.min() - pad, 0), min(ys.max() + pad, srcimg.shape[0])
             patch = np.dstack([srccol[y0:y1, x0:x1], a[y0:y1, x0:x1]])
