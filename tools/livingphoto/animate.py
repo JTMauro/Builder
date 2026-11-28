@@ -47,16 +47,22 @@ def fill_hole(img, hole):
     hb = (hole > 0.02).astype(np.float32); best = None
     lo = cv2.GaussianBlur(img, (0, 0), 12 * W / 960)
     hm_ = hb > 0; nh = hm_.sum() + 1
-    cands = [(fx, fy) for fx in (-.6, -.45, -.3, -.2, -.12, .12, .2, .3, .45, .6) for fy in (-.12, -.06, 0, .06, .12)]
+    cands = [(fx, fy) for fx in (-.6, -.45, -.3, -.2, -.12, 0, .12, .2, .3, .45, .6) for fy in (-.5, -.35, -.2, -.12, -.06, 0, .06, .12, .2, .35, .5) if (fx, fy) != (0, 0)]
     for fx, fy in cands:
         dx, dy = int(fx * W), int(fy * H)
         over = (np.roll(hb, (dy, dx), (0, 1)) * hb).sum() / nh
         mis = np.abs(np.roll(lo, (dy, dx), (0, 1))[hm_] - out[hm_]).mean()
-        sc = mis + 0.25 * over
+        sc = 0.5 * mis + 1.0 * over
         if best is None or sc < best[0]: best = (sc, dx, dy)
     hpm = hp * (1 - cv2.dilate(hb, np.ones((15, 15), np.uint8)))[..., None]
     donor = np.roll(hpm, (best[2], best[1]), (0, 1))
-    out = np.clip(out + donor * 0.7, 0, 1)
+    # match the amount of detail to what surrounds each spot of the hole
+    sg = 25 * W / 960
+    e_hp = np.abs(hp).mean(2)
+    e_sur = cv2.GaussianBlur(e_hp * keep, (0, 0), sg) / np.maximum(cv2.GaussianBlur(keep, (0, 0), sg), 1e-4)
+    e_don = cv2.GaussianBlur(np.abs(donor).mean(2), (0, 0), sg)
+    gain = np.clip(e_sur / np.maximum(e_don, 1e-4), 0.35, 1.0)[..., None]
+    out = np.clip(out + donor * gain * 0.9, 0, 1)
     hm = soft(hole, 6 * W / 960)[..., None]
     return img * (1 - hm) + out * hm
 
@@ -98,6 +104,10 @@ def render(name, cfg, out_mp4, W=960, fps=15, secs=6, swim=None, seed=1):
             c = scenes.C[key]; srcimg = img if c['img'] == name else load(c['img'], W)
             pm = polymask(srcimg.shape[1], srcimg.shape[0], c['poly'], s)
             a, srccol = refine2(srcimg, pm)
+            if key in scenes.SOLID:
+                core = cv2.erode((pm > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(np.float32)
+                a = np.maximum(a, soft(core, 1.0))
+                srccol = np.where((core > 0.5)[..., None], srcimg, srccol)
             if c['img'] == name:
                 removed.add(key); hole = np.maximum(hole, cv2.dilate(np.maximum(a, pm), np.ones((int(17*s), int(17*s)), np.uint8)))
             ys, xs = np.nonzero(a > 0.05); pad = int(20 * s)
@@ -110,13 +120,18 @@ def render(name, cfg, out_mp4, W=960, fps=15, secs=6, swim=None, seed=1):
             cc = dict(c); cc['poly'] = [((x*s - x0) * sc / s, (y*s - y0) * sc / s) for x, y in c['poly']]
             cc['head'] = ((c['head'][0]*s - x0) * sc / s, (c['head'][1]*s - y0) * sc / s); cc['tail'] = ((c['tail'][0]*s - x0) * sc / s, (c['tail'][1]*s - y0) * sc / s)
             fld = creature_fields(cc, pw_, ph_, s, PX, PY, mask=patch[..., 3])
-            dirx = 1 if c['head'][0] > c['tail'][0] else -1
-            cy = (py_ * s) if py_ is not None else (y0 + y1) / 2
-            ocx = (x0 + x1) / 2
-            D = W + pw_
-            u0 = ((ocx + pw_ / 2) / D) if dirx > 0 else ((W + pw_ / 2 - ocx) / D)
-            if c['img'] != name: u0 = 0
-            travelers.append(dict(c=cc, patch=patch, fld=fld, PX=PX, PY=PY, dirx=dirx, cy=cy, D=D, u0=u0 + off, speed=speed, ph=rng.uniform(0, 6.28), sc=sc))
+            hx_, hy_ = c['head']; tx_, ty_ = c['tail']; L_ = math.hypot(hx_ - tx_, hy_ - ty_) + 1e-6
+            ux_, uy_ = (hx_ - tx_) / L_, (hy_ - ty_) / L_
+            if abs(uy_) < 0.25: ux_, uy_ = (1.0 if ux_ > 0 else -1.0), 0.0   # mostly level: swim straight across
+            if c['img'] == name: c0x, c0y = (x0 + x1) / 2, (y0 + y1) / 2
+            else: c0x, c0y = W / 2, (py_ * s if py_ is not None else H / 2)
+            hw, hh = pw_ / 2 + 2, ph_ / 2 + 2; lo, hi = -1e9, 1e9
+            for c0, d_, lim, half in ((c0x, ux_, W, hw), (c0y, uy_, H, hh)):
+                if abs(d_) > 1e-6:
+                    t1, t2 = (-half - c0) / d_, (lim + half - c0) / d_
+                    lo, hi = max(lo, min(t1, t2)), min(hi, max(t1, t2))
+            u0 = (-lo / (hi - lo)) if c['img'] == name else 0
+            travelers.append(dict(c=cc, patch=patch, fld=fld, PX=PX, PY=PY, c0=(c0x, c0y), d=(ux_, uy_), lo=lo, hi=hi, u0=u0 + off, speed=speed, ph=rng.uniform(0, 6.28), sc=sc))
         if hole.max() > 0: img = fill_hole(img, hole)
     cre = []; keep_still = np.zeros((H, W), np.float32)
     for c in cfg['creatures']:
@@ -179,11 +194,12 @@ def render(name, cfg, out_mp4, W=960, fps=15, secs=6, swim=None, seed=1):
         for t in travelers:
             u = (f / N * t['speed'] + t['u0']) % 1.0
             pw_ = t['patch'].shape[1]; ph_ = t['patch'].shape[0]
-            cx = (-pw_ / 2 + u * t['D']) if t['dirx'] > 0 else (W + pw_ / 2 - u * t['D'])
-            c = t['c']; ddx, ddy = creature_disp(c, t['fld'], th * t['speed'] if False else th, t['ph'], s * t['sc'], glide_on=False)
+            tt = t['lo'] + u * (t['hi'] - t['lo'])
+            cx = t['c0'][0] + tt * t['d'][0]
+            c = t['c']; ddx, ddy = creature_disp(c, t['fld'], th, t['ph'], s * t['sc'], glide_on=False)
             if np.ndim(ddx) == 0: ddx = np.full_like(t['PX'], ddx); ddy = np.full_like(t['PX'], ddy)
             wp = cv2.remap(t['patch'], t['PX'] - ddx, t['PY'] - ddy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-            cy = t['cy'] + 4 * s * math.sin(2 * th + t['ph'])
+            cy = t['c0'][1] + tt * t['d'][1] + 4 * s * math.sin(2 * th + t['ph'])
             ox, oy = int(round(cx - pw_ / 2)), int(round(cy - ph_ / 2))
             xa, ya = max(ox, 0), max(oy, 0); xb, yb = min(ox + pw_, W), min(oy + ph_, H)
             if xb <= xa or yb <= ya: continue
