@@ -105,6 +105,13 @@ fixed. Add to it at the end of every session (newest lessons at the top of each 
   with "{", not the last line.
 - Vertex colours (glTF COLOR_0) are linear, so TripoSR's vertex-coloured GLBs render darker in three.js than
   the photo; the baked texture (sRGB) shows the intended colours.
+- Living photos (tools/livingphoto/animate.py): stills become seamless GIF/MP4 loops on CPU by warping, not
+  AI video. Every motion is a whole multiple of the loop phase. Creatures glide/bob/undulate/flap inside a
+  rough outline; plants sway by height above the root; smiles lift the mouth corners and waves rotate an
+  arm around the elbow, both easing back by the loop end. Swim-through: GrabCut + outline for the cutout,
+  dilate the hole well past the animal, fill with a normalised blur of the surroundings plus fine detail
+  borrowed from another part of the picture (a plain inpaint leaves a dark ghost). GIFs are heavy: about
+  720x405 at 12 fps for 6 s is roughly 13 MB.
 
 ### Python package
 - The voice list lives in media_backend/voices.py (no imports) to avoid circular imports; op modules
